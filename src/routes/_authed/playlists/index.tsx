@@ -14,16 +14,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useAppForm } from '@/lib/form'
 import { CreateGroupForm } from '@/domain/groups'
 import { listPlaylistsFn, createPlaylistFn } from '@/server/playlists'
+import { getMyRoleFn } from '@/server/members'
 
 export const Route = createFileRoute('/_authed/playlists/')({
-  loader: () => listPlaylistsFn(),
+  loader: async () => {
+    const [playlists, role] = await Promise.all([listPlaylistsFn(), getMyRoleFn()])
+    return { playlists, role }
+  },
   component: PlaylistsPage,
 })
 
 function PlaylistsPage() {
-  const playlists = Route.useLoaderData()
+  const { playlists, role } = Route.useLoaderData()
+  const isManager = role === 'owner' || role === 'admin'
   const router = useRouter()
-  const [open, setOpen] = useState(playlists.length === 0)
+  const [open, setOpen] = useState(isManager && playlists.length === 0)
 
   return (
     <div className="w-full space-y-6 p-8">
@@ -32,23 +37,25 @@ function PlaylistsPage() {
           <h1 className="text-xl font-bold">Playlists</h1>
           <p className="text-sm text-muted-foreground">{playlists.length} playlist(s)</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button>Nouvelle playlist</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nouvelle playlist</DialogTitle>
-              <DialogDescription>Ex: Messe de Noël, Répétition du 12 mars…</DialogDescription>
-            </DialogHeader>
-            <CreatePlaylistDialogForm
-              onCreated={async () => {
-                setOpen(false)
-                await router.invalidate()
-              }}
-            />
-          </DialogContent>
-        </Dialog>
+        {isManager ? (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button>Nouvelle playlist</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Nouvelle playlist</DialogTitle>
+                <DialogDescription>Ex: Messe de Noël, Répétition du 12 mars…</DialogDescription>
+              </DialogHeader>
+              <CreatePlaylistDialogForm
+                onCreated={async () => {
+                  setOpen(false)
+                  await router.invalidate()
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </header>
 
       <Card>

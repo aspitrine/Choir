@@ -97,4 +97,8 @@ export const invitation = pgTable('invitation', {
   inviterId: text('inviter_id')
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  // Better Auth `invitation.additionalFields` (see organization plugin config in lib/auth.ts).
+  firstName: text('first_name'),
+  lastName: text('last_name'),
 })

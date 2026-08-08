@@ -37,6 +37,8 @@ export class Assets extends Context.Tag('Assets')<
     readonly listGroupsForSong: (
       songId: string,
     ) => Effect.Effect<Array<{ assetId: string; group: typeof group.$inferSelect }>>
+    /** Storage keys for every asset in the org — for cleaning up S3 objects before deleting the org. */
+    readonly listStorageKeysForOrg: (orgId: string) => Effect.Effect<Array<string>>
   }
 >() {}
 
@@ -175,6 +177,15 @@ export const AssetsLive = Layer.effect(
             .innerJoin(group, eq(group.id, assetGroup.groupId))
             .where(eq(asset.songId, songId)),
         ),
+      listStorageKeysForOrg: (orgId) =>
+        Effect.promise(async () => {
+          const rows = await db
+            .select({ storageKey: asset.storageKey })
+            .from(asset)
+            .innerJoin(song, eq(asset.songId, song.id))
+            .where(eq(song.organizationId, orgId))
+          return rows.map((r) => r.storageKey)
+        }),
     }
   }),
 )

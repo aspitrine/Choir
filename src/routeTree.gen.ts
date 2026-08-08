@@ -12,8 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
+import { Route as AcceptInviteInvitationIdRouteImport } from './routes/accept-invite/$invitationId'
 import { Route as STokenRouteImport } from './routes/s/$token'
 import { Route as AuthedGroupsIndexRouteImport } from './routes/_authed/groups/index'
+import { Route as AuthedMembersIndexRouteImport } from './routes/_authed/members/index'
 import { Route as AuthedPlaylistsIndexRouteImport } from './routes/_authed/playlists/index'
 import { Route as AuthedPlaylistsPlaylistIdRouteImport } from './routes/_authed/playlists/$playlistId'
 import { Route as AuthedSongsIndexRouteImport } from './routes/_authed/songs/index'
@@ -34,6 +36,12 @@ const AuthedDashboardRoute = AuthedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AcceptInviteInvitationIdRoute =
+  AcceptInviteInvitationIdRouteImport.update({
+    id: '/accept-invite/$invitationId',
+    path: '/accept-invite/$invitationId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const STokenRoute = STokenRouteImport.update({
   id: '/s/$token',
   path: '/s/$token',
@@ -42,6 +50,11 @@ const STokenRoute = STokenRouteImport.update({
 const AuthedGroupsIndexRoute = AuthedGroupsIndexRouteImport.update({
   id: '/groups/',
   path: '/groups/',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedMembersIndexRoute = AuthedMembersIndexRouteImport.update({
+  id: '/members/',
+  path: '/members/',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedPlaylistsIndexRoute = AuthedPlaylistsIndexRouteImport.update({
@@ -74,22 +87,26 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof AuthedDashboardRoute
+  '/accept-invite/$invitationId': typeof AcceptInviteInvitationIdRoute
   '/s/$token': typeof STokenRoute
   '/playlists/$playlistId': typeof AuthedPlaylistsPlaylistIdRoute
   '/songs/$songId': typeof AuthedSongsSongIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/groups/': typeof AuthedGroupsIndexRoute
+  '/members/': typeof AuthedMembersIndexRoute
   '/playlists/': typeof AuthedPlaylistsIndexRoute
   '/songs/': typeof AuthedSongsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof AuthedDashboardRoute
+  '/accept-invite/$invitationId': typeof AcceptInviteInvitationIdRoute
   '/s/$token': typeof STokenRoute
   '/playlists/$playlistId': typeof AuthedPlaylistsPlaylistIdRoute
   '/songs/$songId': typeof AuthedSongsSongIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/groups': typeof AuthedGroupsIndexRoute
+  '/members': typeof AuthedMembersIndexRoute
   '/playlists': typeof AuthedPlaylistsIndexRoute
   '/songs': typeof AuthedSongsIndexRoute
 }
@@ -98,11 +115,13 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authed': typeof AuthedRouteWithChildren
   '/_authed/dashboard': typeof AuthedDashboardRoute
+  '/accept-invite/$invitationId': typeof AcceptInviteInvitationIdRoute
   '/s/$token': typeof STokenRoute
   '/_authed/playlists/$playlistId': typeof AuthedPlaylistsPlaylistIdRoute
   '/_authed/songs/$songId': typeof AuthedSongsSongIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/_authed/groups/': typeof AuthedGroupsIndexRoute
+  '/_authed/members/': typeof AuthedMembersIndexRoute
   '/_authed/playlists/': typeof AuthedPlaylistsIndexRoute
   '/_authed/songs/': typeof AuthedSongsIndexRoute
 }
@@ -111,22 +130,26 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/accept-invite/$invitationId'
     | '/s/$token'
     | '/playlists/$playlistId'
     | '/songs/$songId'
     | '/api/auth/$'
     | '/groups/'
+    | '/members/'
     | '/playlists/'
     | '/songs/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/dashboard'
+    | '/accept-invite/$invitationId'
     | '/s/$token'
     | '/playlists/$playlistId'
     | '/songs/$songId'
     | '/api/auth/$'
     | '/groups'
+    | '/members'
     | '/playlists'
     | '/songs'
   id:
@@ -134,11 +157,13 @@ export interface FileRouteTypes {
     | '/'
     | '/_authed'
     | '/_authed/dashboard'
+    | '/accept-invite/$invitationId'
     | '/s/$token'
     | '/_authed/playlists/$playlistId'
     | '/_authed/songs/$songId'
     | '/api/auth/$'
     | '/_authed/groups/'
+    | '/_authed/members/'
     | '/_authed/playlists/'
     | '/_authed/songs/'
   fileRoutesById: FileRoutesById
@@ -146,6 +171,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthedRoute: typeof AuthedRouteWithChildren
+  AcceptInviteInvitationIdRoute: typeof AcceptInviteInvitationIdRoute
   STokenRoute: typeof STokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -173,6 +199,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedDashboardRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/accept-invite/$invitationId': {
+      id: '/accept-invite/$invitationId'
+      path: '/accept-invite/$invitationId'
+      fullPath: '/accept-invite/$invitationId'
+      preLoaderRoute: typeof AcceptInviteInvitationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/s/$token': {
       id: '/s/$token'
       path: '/s/$token'
@@ -185,6 +218,13 @@ declare module '@tanstack/react-router' {
       path: '/groups'
       fullPath: '/groups/'
       preLoaderRoute: typeof AuthedGroupsIndexRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/members/': {
+      id: '/_authed/members/'
+      path: '/members'
+      fullPath: '/members/'
+      preLoaderRoute: typeof AuthedMembersIndexRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/playlists/': {
@@ -230,6 +270,7 @@ interface AuthedRouteChildren {
   AuthedPlaylistsPlaylistIdRoute: typeof AuthedPlaylistsPlaylistIdRoute
   AuthedSongsSongIdRoute: typeof AuthedSongsSongIdRoute
   AuthedGroupsIndexRoute: typeof AuthedGroupsIndexRoute
+  AuthedMembersIndexRoute: typeof AuthedMembersIndexRoute
   AuthedPlaylistsIndexRoute: typeof AuthedPlaylistsIndexRoute
   AuthedSongsIndexRoute: typeof AuthedSongsIndexRoute
 }
@@ -239,6 +280,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedPlaylistsPlaylistIdRoute: AuthedPlaylistsPlaylistIdRoute,
   AuthedSongsSongIdRoute: AuthedSongsSongIdRoute,
   AuthedGroupsIndexRoute: AuthedGroupsIndexRoute,
+  AuthedMembersIndexRoute: AuthedMembersIndexRoute,
   AuthedPlaylistsIndexRoute: AuthedPlaylistsIndexRoute,
   AuthedSongsIndexRoute: AuthedSongsIndexRoute,
 }
@@ -249,6 +291,7 @@ const AuthedRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthedRoute: AuthedRouteWithChildren,
+  AcceptInviteInvitationIdRoute: AcceptInviteInvitationIdRoute,
   STokenRoute: STokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }

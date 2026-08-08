@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router'
-import { LayoutDashboard, Music, Tag, ListMusic, LogOut } from 'lucide-react'
+import { LayoutDashboard, Music, Tag, ListMusic, Users, LogOut } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -20,9 +20,13 @@ const NAV_ITEMS = [
   { to: '/playlists' as const, label: 'Playlists', icon: ListMusic },
 ]
 
-export function AppSidebar() {
+export function AppSidebar({ role }: { role: string | null }) {
   const { data: session } = useSession()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const isManager = role === 'owner' || role === 'admin'
+  const navItems = isManager
+    ? [...NAV_ITEMS, { to: '/members' as const, label: 'Membres', icon: Users }]
+    : NAV_ITEMS
 
   return (
     <Sidebar>
@@ -33,7 +37,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV_ITEMS.map((item) => (
+              {navItems.map((item) => (
                 <SidebarMenuItem key={item.to}>
                   <SidebarMenuButton asChild isActive={pathname.startsWith(item.to)}>
                     <Link to={item.to}>

@@ -8,6 +8,7 @@ import { AccessLive } from './Access'
 import { GroupsLive } from './Groups'
 import { PlaylistsLive } from './Playlists'
 import { ShareLinksLive } from './ShareLinks'
+import { MembersLive } from './Members'
 
 const AppLayer = Layer.mergeAll(
   DatabaseLive,
@@ -19,6 +20,7 @@ const AppLayer = Layer.mergeAll(
   GroupsLive.pipe(Layer.provide(DatabaseLive)),
   PlaylistsLive.pipe(Layer.provide(DatabaseLive)),
   ShareLinksLive.pipe(Layer.provide(DatabaseLive)),
+  MembersLive.pipe(Layer.provide(DatabaseLive)),
 )
 
 export const AppRuntime = ManagedRuntime.make(AppLayer)

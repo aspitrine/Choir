@@ -17,6 +17,7 @@ import { TablePager } from '@/components/table-pager'
 import { useAppForm } from '@/lib/form'
 import { CreateGroupForm } from '@/domain/groups'
 import { searchGroupsFn, createGroupFn, deleteGroupFn } from '@/server/groups'
+import { getMyRoleFn } from '@/server/members'
 import { useConfirm } from '@/components/confirm-dialog'
 
 const GroupsSearch = Schema.Struct({
@@ -29,7 +30,8 @@ export const Route = createFileRoute('/_authed/groups/')({
   loaderDeps: ({ search }) => ({ q: search.q ?? '', page: search.page ?? 1 }),
   loader: async ({ deps }) => {
     try {
-      return await searchGroupsFn({ data: deps })
+      const [page, role] = await Promise.all([searchGroupsFn({ data: deps }), getMyRoleFn()])
+      return { ...page, role }
     } catch {
       throw redirect({ to: '/songs' })
     }
@@ -38,7 +40,8 @@ export const Route = createFileRoute('/_authed/groups/')({
 })
 
 function GroupsPage() {
-  const { rows: groups, total, page, pageSize } = Route.useLoaderData()
+  const { rows: groups, total, page, pageSize, role } = Route.useLoaderData()
+  const isManager = role === 'owner' || role === 'admin'
   const { q } = Route.useSearch()
   const navigate = Route.useNavigate()
   const router = useRouter()
@@ -67,23 +70,25 @@ function GroupsPage() {
             Utilisées pour filtrer les fichiers dans les liens de partage
           </p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button>Nouveau groupe</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nouveau groupe</DialogTitle>
-              <DialogDescription>Ex: Sopranos, Chorale enfants, Bureau…</DialogDescription>
-            </DialogHeader>
-            <CreateGroupDialogForm
-              onCreated={async () => {
-                setOpen(false)
-                await router.invalidate()
-              }}
-            />
-          </DialogContent>
-        </Dialog>
+        {isManager ? (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button>Nouveau groupe</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Nouveau groupe</DialogTitle>
+                <DialogDescription>Ex: Sopranos, Chorale enfants, Bureau…</DialogDescription>
+              </DialogHeader>
+              <CreateGroupDialogForm
+                onCreated={async () => {
+                  setOpen(false)
+                  await router.invalidate()
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </header>
 
       <Card>
@@ -101,30 +106,32 @@ function GroupsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Nom</TableHead>
-                <TableHead className="w-0" />
+                {isManager ? <TableHead className="w-0" /> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
               {groups.map((grp) => (
                 <TableRow key={grp.id}>
                   <TableCell>{grp.name}</TableCell>
-                  <TableCell>
-                    <button
-                      className="text-xs text-destructive hover:underline"
-                      onClick={async () => {
-                        const ok = await confirm({
-                          title: 'Supprimer ce groupe',
-                          description: `"${grp.name}" sera retirée de tous les fichiers et liens de partage qui l'utilisent.`,
-                          confirmLabel: 'Supprimer',
-                        })
-                        if (!ok) return
-                        await deleteGroupFn({ data: { groupId: grp.id } })
-                        await router.invalidate()
-                      }}
-                    >
-                      Supprimer
-                    </button>
-                  </TableCell>
+                  {isManager ? (
+                    <TableCell>
+                      <button
+                        className="text-xs text-destructive hover:underline"
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: 'Supprimer ce groupe',
+                            description: `"${grp.name}" sera retirée de tous les fichiers et liens de partage qui l'utilisent.`,
+                            confirmLabel: 'Supprimer',
+                          })
+                          if (!ok) return
+                          await deleteGroupFn({ data: { groupId: grp.id } })
+                          await router.invalidate()
+                        }}
+                      >
+                        Supprimer
+                      </button>
+                    </TableCell>
+                  ) : null}
                 </TableRow>
               ))}
               {groups.length === 0 ? (

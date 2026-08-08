@@ -45,6 +45,7 @@ import {
 import { listShareLinksFn, createShareLinkFn, revokeShareLinkFn } from '@/server/shareLinks'
 import { listSongsFn, updateSongFn, getSongFn } from '@/server/songs'
 import { listGroupsFn } from '@/server/groups'
+import { getMyRoleFn } from '@/server/members'
 import { useConfirm } from '@/components/confirm-dialog'
 import { useAppForm } from '@/lib/form'
 import { CreateSongForm } from '@/domain/songs'
@@ -54,12 +55,13 @@ import { AudioPlayer } from '@/components/audio-player'
 export const Route = createFileRoute('/_authed/playlists/$playlistId')({
   loader: async ({ params }) => {
     try {
-      const [data, shareLinks, allGroups] = await Promise.all([
+      const [data, shareLinks, allGroups, role] = await Promise.all([
         getPlaylistFn({ data: { playlistId: params.playlistId } }),
         listShareLinksFn({ data: { playlistId: params.playlistId } }),
         listGroupsFn(),
+        getMyRoleFn(),
       ])
-      return { ...data, shareLinks, allGroups }
+      return { ...data, shareLinks, allGroups, role }
     } catch {
       throw redirect({ to: '/playlists' })
     }
@@ -68,7 +70,8 @@ export const Route = createFileRoute('/_authed/playlists/$playlistId')({
 })
 
 function PlaylistDetailPage() {
-  const { playlist, items, shareLinks, allGroups, eventDates } = Route.useLoaderData()
+  const { playlist, items, shareLinks, allGroups, eventDates, role } = Route.useLoaderData()
+  const isManager = role === 'owner' || role === 'admin'
   const router = useRouter()
   const navigate = Route.useNavigate()
   const confirm = useConfirm()
@@ -88,27 +91,30 @@ function PlaylistDetailPage() {
           <Link to="/playlists">
             <Button variant="outline">Retour</Button>
           </Link>
-          <Button
-            variant="destructive"
-            onClick={async () => {
-              const ok = await confirm({
-                title: 'Supprimer cette playlist',
-                description: `"${playlist.name}" et ses liens de partage seront supprimés définitivement.`,
-                confirmLabel: 'Supprimer',
-              })
-              if (!ok) return
-              await deletePlaylistFn({ data: { playlistId: playlist.id } })
-              navigate({ to: '/playlists' })
-            }}
-          >
-            Supprimer
-          </Button>
+          {isManager ? (
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                const ok = await confirm({
+                  title: 'Supprimer cette playlist',
+                  description: `"${playlist.name}" et ses liens de partage seront supprimés définitivement.`,
+                  confirmLabel: 'Supprimer',
+                })
+                if (!ok) return
+                await deletePlaylistFn({ data: { playlistId: playlist.id } })
+                navigate({ to: '/playlists' })
+              }}
+            >
+              Supprimer
+            </Button>
+          ) : null}
         </div>
       </header>
 
       <EventDatesCard
         playlistId={playlist.id}
         eventDates={eventDates}
+        isManager={isManager}
         onChanged={() => router.invalidate()}
       />
 
@@ -116,6 +122,7 @@ function PlaylistDetailPage() {
         playlistId={playlist.id}
         items={items}
         excludeSongIds={songIdsInPlaylist}
+        isManager={isManager}
         onChanged={() => router.invalidate()}
       />
 
@@ -123,6 +130,7 @@ function PlaylistDetailPage() {
         playlistId={playlist.id}
         shareLinks={shareLinks}
         allGroups={allGroups}
+        isManager={isManager}
         onChanged={() => router.invalidate()}
       />
     </div>
@@ -133,6 +141,7 @@ function SongList({
   playlistId,
   items,
   excludeSongIds,
+  isManager,
   onChanged,
 }: {
   playlistId: string
@@ -149,6 +158,7 @@ function SongList({
     }
   }>
   excludeSongIds: Set<string>
+  isManager: boolean
   onChanged: () => void
 }) {
   const confirm = useConfirm()
@@ -164,6 +174,7 @@ function SongList({
   )
 
   async function handleDragEnd(event: DragEndEvent) {
+    if (!isManager) return
     const { active, over } = event
     if (!over || active.id === over.id) return
     const oldIndex = order.indexOf(String(active.id))
@@ -182,26 +193,30 @@ function SongList({
         <div className="flex items-center justify-between">
           <div>
             <CardTitle>Chants</CardTitle>
-            <CardDescription>{items.length} chant(s) — glissez pour réordonner</CardDescription>
+            <CardDescription>
+              {items.length} chant(s){isManager ? ' — glissez pour réordonner' : ''}
+            </CardDescription>
           </div>
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
-            <DialogTrigger asChild>
-              <Button>Ajouter un chant</Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Ajouter un chant</DialogTitle>
-                <DialogDescription>Recherchez un chant à ajouter à la playlist</DialogDescription>
-              </DialogHeader>
-              <AddSongTable
-                excludeSongIds={excludeSongIds}
-                onAdd={async (songId) => {
-                  await addSongToPlaylistFn({ data: { playlistId, songId } })
-                  onChanged()
-                }}
-              />
-            </DialogContent>
-          </Dialog>
+          {isManager ? (
+            <Dialog open={addOpen} onOpenChange={setAddOpen}>
+              <DialogTrigger asChild>
+                <Button>Ajouter un chant</Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Ajouter un chant</DialogTitle>
+                  <DialogDescription>Recherchez un chant à ajouter à la playlist</DialogDescription>
+                </DialogHeader>
+                <AddSongTable
+                  excludeSongIds={excludeSongIds}
+                  onAdd={async (songId) => {
+                    await addSongToPlaylistFn({ data: { playlistId, songId } })
+                    onChanged()
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -215,6 +230,7 @@ function SongList({
                   key={itemId}
                   itemId={itemId}
                   song={item.song}
+                  isManager={isManager}
                   onChanged={onChanged}
                   onRemove={async () => {
                     const ok = await confirm({
@@ -242,6 +258,7 @@ function SongList({
 function SortableSongRow({
   itemId,
   song,
+  isManager,
   onChanged,
   onRemove,
 }: {
@@ -254,10 +271,14 @@ function SortableSongRow({
     key: string | null
     tempo: string | null
   }
+  isManager: boolean
   onChanged: () => void
   onRemove: () => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: itemId })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: itemId,
+    disabled: !isManager,
+  })
   const [editOpen, setEditOpen] = useState(false)
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -272,14 +293,16 @@ function SortableSongRow({
       className="flex flex-col gap-2 rounded-md border bg-background px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="flex items-center gap-2">
-        <button
-          {...attributes}
-          {...listeners}
-          className="cursor-grab touch-none text-muted-foreground active:cursor-grabbing"
-          aria-label="Réordonner"
-        >
-          ⠿
-        </button>
+        {isManager ? (
+          <button
+            {...attributes}
+            {...listeners}
+            className="cursor-grab touch-none text-muted-foreground active:cursor-grabbing"
+            aria-label="Réordonner"
+          >
+            ⠿
+          </button>
+        ) : null}
         <div>
           <div className="font-medium">{song.title}</div>
           {song.composer ? <div className="text-xs text-muted-foreground">{song.composer}</div> : null}
@@ -287,30 +310,37 @@ function SortableSongRow({
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <SongDetailsDialog songId={song.id} />
-        <Dialog open={editOpen} onOpenChange={setEditOpen}>
-          <DialogTrigger asChild>
-            <button className="text-xs text-muted-foreground hover:underline">Modifier</button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Modifier le chant</DialogTitle>
-            </DialogHeader>
-            <EditSongForm
-              song={song}
-              onSaved={async () => {
-                setEditOpen(false)
-                onChanged()
-              }}
-            />
-          </DialogContent>
-        </Dialog>
-
-        <Link to="/songs/$songId" params={{ songId: song.id }} className="text-xs text-muted-foreground hover:underline">
+        {isManager ? (
+          <Dialog open={editOpen} onOpenChange={setEditOpen}>
+            <DialogTrigger asChild>
+              <button className="text-xs text-muted-foreground hover:underline">Modifier</button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Modifier le chant</DialogTitle>
+              </DialogHeader>
+              <EditSongForm
+                song={song}
+                onSaved={async () => {
+                  setEditOpen(false)
+                  onChanged()
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        ) : null}
+        <Link
+          to="/songs/$songId"
+          params={{ songId: song.id }}
+          className="text-xs text-muted-foreground hover:underline"
+        >
           Gérer les fichiers
         </Link>
-        <button className="text-xs text-destructive hover:underline" onClick={onRemove}>
-          Retirer
-        </button>
+        {isManager ? (
+          <button className="text-xs text-destructive hover:underline" onClick={onRemove}>
+            Retirer
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -537,10 +567,12 @@ const eventDateFormatter = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long',
 function EventDatesCard({
   playlistId,
   eventDates,
+  isManager,
   onChanged,
 }: {
   playlistId: string
   eventDates: Array<{ id: string; eventDate: string | Date }>
+  isManager: boolean
   onChanged: () => void
 }) {
   const confirm = useConfirm()
@@ -560,52 +592,56 @@ function EventDatesCard({
           {eventDates.map((d) => (
             <div key={d.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
               <span>{eventDateFormatter.format(new Date(d.eventDate))}</span>
-              <button
-                className="text-xs text-destructive hover:underline"
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: 'Supprimer cette date',
-                    description: eventDateFormatter.format(new Date(d.eventDate)),
-                    confirmLabel: 'Supprimer',
-                  })
-                  if (!ok) return
-                  await removeEventDateFn({ data: { playlistId, eventDateId: d.id } })
-                  onChanged()
-                }}
-              >
-                Supprimer
-              </button>
+              {isManager ? (
+                <button
+                  className="text-xs text-destructive hover:underline"
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: 'Supprimer cette date',
+                      description: eventDateFormatter.format(new Date(d.eventDate)),
+                      confirmLabel: 'Supprimer',
+                    })
+                    if (!ok) return
+                    await removeEventDateFn({ data: { playlistId, eventDateId: d.id } })
+                    onChanged()
+                  }}
+                >
+                  Supprimer
+                </button>
+              ) : null}
             </div>
           ))}
           {eventDates.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucune date planifiée</p>
           ) : null}
         </div>
-        <div className="flex items-end gap-2">
-          <div className="flex-1 space-y-1">
-            <label htmlFor="event-date" className="text-sm font-medium">
-              Ajouter une date
-            </label>
-            <Input
-              id="event-date"
-              type="datetime-local"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-            />
+        {isManager ? (
+          <div className="flex items-end gap-2">
+            <div className="flex-1 space-y-1">
+              <label htmlFor="event-date" className="text-sm font-medium">
+                Ajouter une date
+              </label>
+              <Input
+                id="event-date"
+                type="datetime-local"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+              />
+            </div>
+            <Button
+              disabled={adding || !value}
+              onClick={async () => {
+                setAdding(true)
+                await addEventDateFn({ data: { playlistId, eventDate: new Date(value).toISOString() } })
+                setValue('')
+                setAdding(false)
+                onChanged()
+              }}
+            >
+              {adding ? 'Ajout…' : 'Ajouter'}
+            </Button>
           </div>
-          <Button
-            disabled={adding || !value}
-            onClick={async () => {
-              setAdding(true)
-              await addEventDateFn({ data: { playlistId, eventDate: new Date(value).toISOString() } })
-              setValue('')
-              setAdding(false)
-              onChanged()
-            }}
-          >
-            {adding ? 'Ajout…' : 'Ajouter'}
-          </Button>
-        </div>
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -633,6 +669,7 @@ function ShareLinksCard({
   playlistId,
   shareLinks,
   allGroups,
+  isManager,
   onChanged,
 }: {
   playlistId: string
@@ -641,6 +678,7 @@ function ShareLinksCard({
     groups: Array<{ id: string; name: string }>
   }>
   allGroups: Array<{ id: string; name: string }>
+  isManager: boolean
   onChanged: () => void
 }) {
   const confirm = useConfirm()
@@ -661,39 +699,43 @@ function ShareLinksCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {allGroups.length > 0 ? (
-          <div className="space-y-1.5">
-            <p className="text-sm font-medium">Groupes</p>
-            <div className="flex flex-wrap gap-3">
-              {allGroups.map((grp) => (
-                <label key={grp.id} className="flex items-center gap-1.5 text-sm">
-                  <Checkbox
-                    checked={groupIds.has(grp.id)}
-                    onCheckedChange={(checked) => {
-                      const next = new Set(groupIds)
-                      if (checked === true) next.add(grp.id)
-                      else next.delete(grp.id)
-                      setGroupIds(next)
-                    }}
-                  />
-                  {grp.name}
-                </label>
-              ))}
-            </div>
-          </div>
+        {isManager ? (
+          <>
+            {allGroups.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">Groupes</p>
+                <div className="flex flex-wrap gap-3">
+                  {allGroups.map((grp) => (
+                    <label key={grp.id} className="flex items-center gap-1.5 text-sm">
+                      <Checkbox
+                        checked={groupIds.has(grp.id)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(groupIds)
+                          if (checked === true) next.add(grp.id)
+                          else next.delete(grp.id)
+                          setGroupIds(next)
+                        }}
+                      />
+                      {grp.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <Button
+              disabled={creating}
+              onClick={async () => {
+                setCreating(true)
+                await createShareLinkFn({ data: { playlistId, groupIds: [...groupIds] } })
+                setGroupIds(new Set())
+                setCreating(false)
+                onChanged()
+              }}
+            >
+              {creating ? 'Création…' : 'Créer un lien'}
+            </Button>
+          </>
         ) : null}
-        <Button
-          disabled={creating}
-          onClick={async () => {
-            setCreating(true)
-            await createShareLinkFn({ data: { playlistId, groupIds: [...groupIds] } })
-            setGroupIds(new Set())
-            setCreating(false)
-            onChanged()
-          }}
-        >
-          {creating ? 'Création…' : 'Créer un lien'}
-        </Button>
 
         <div className="space-y-2">
           {active.map(({ link, groups }) => (
@@ -702,21 +744,23 @@ function ShareLinksCard({
                 <code className="truncate text-xs">{origin}/s/{link.token}</code>
                 <div className="flex shrink-0 items-center gap-3">
                   <CopyLinkButton url={`${origin}/s/${link.token}`} />
-                  <button
-                    className="text-xs text-destructive hover:underline"
-                    onClick={async () => {
-                      const ok = await confirm({
-                        title: 'Révoquer ce lien',
-                        description: 'Le lien cessera de fonctionner immédiatement. Cette action est irréversible.',
-                        confirmLabel: 'Révoquer',
-                      })
-                      if (!ok) return
-                      await revokeShareLinkFn({ data: { shareLinkId: link.id } })
-                      onChanged()
-                    }}
-                  >
-                    Révoquer
-                  </button>
+                  {isManager ? (
+                    <button
+                      className="text-xs text-destructive hover:underline"
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: 'Révoquer ce lien',
+                          description: 'Le lien cessera de fonctionner immédiatement. Cette action est irréversible.',
+                          confirmLabel: 'Révoquer',
+                        })
+                        if (!ok) return
+                        await revokeShareLinkFn({ data: { shareLinkId: link.id } })
+                        onChanged()
+                      }}
+                    >
+                      Révoquer
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <div className="flex flex-wrap gap-1">

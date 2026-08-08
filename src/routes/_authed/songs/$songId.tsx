@@ -18,6 +18,7 @@ import {
 import { getSongFn, deleteSongFn } from '@/server/songs'
 import { createUploadIntentFn, confirmUploadFn, deleteAssetFn, setAssetGroupsFn } from '@/server/assets'
 import { listGroupsFn } from '@/server/groups'
+import { getMyRoleFn } from '@/server/members'
 import { PdfViewer } from '@/components/pdf-viewer'
 import { AudioPlayer } from '@/components/audio-player'
 import { useConfirm } from '@/components/confirm-dialog'
@@ -25,11 +26,12 @@ import { useConfirm } from '@/components/confirm-dialog'
 export const Route = createFileRoute('/_authed/songs/$songId')({
   loader: async ({ params }) => {
     try {
-      const [data, allGroups] = await Promise.all([
+      const [data, allGroups, role] = await Promise.all([
         getSongFn({ data: { songId: params.songId } }),
         listGroupsFn(),
+        getMyRoleFn(),
       ])
-      return { ...data, allGroups }
+      return { ...data, allGroups, role }
     } catch {
       throw redirect({ to: '/songs' })
     }
@@ -47,7 +49,8 @@ type AssetWithGroups = {
 }
 
 function SongDetailPage() {
-  const { song, assets, allGroups } = Route.useLoaderData()
+  const { song, assets, allGroups, role } = Route.useLoaderData()
+  const isManager = role === 'owner' || role === 'admin'
   const router = useRouter()
   const navigate = Route.useNavigate()
   const confirm = useConfirm()
@@ -62,23 +65,25 @@ function SongDetailPage() {
             <p className="text-sm text-muted-foreground">{song.composer}</p>
           ) : null}
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="destructive"
-            onClick={async () => {
-              const ok = await confirm({
-                title: 'Supprimer ce chant',
-                description: `"${song.title}" et tous ses fichiers seront supprimés définitivement.`,
-                confirmLabel: 'Supprimer',
-              })
-              if (!ok) return
-              await deleteSongFn({ data: { songId: song.id } })
-              navigate({ to: '/songs' })
-            }}
-          >
-            Supprimer
-          </Button>
-        </div>
+        {isManager ? (
+          <div className="flex gap-2">
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                const ok = await confirm({
+                  title: 'Supprimer ce chant',
+                  description: `"${song.title}" et tous ses fichiers seront supprimés définitivement.`,
+                  confirmLabel: 'Supprimer',
+                })
+                if (!ok) return
+                await deleteSongFn({ data: { songId: song.id } })
+                navigate({ to: '/songs' })
+              }}
+            >
+              Supprimer
+            </Button>
+          </div>
+        ) : null}
       </header>
 
       <Card>
@@ -88,25 +93,27 @@ function SongDetailPage() {
               <CardTitle>Partitions et audio</CardTitle>
               <CardDescription>{assets.length} fichier(s)</CardDescription>
             </div>
-            <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-              <DialogTrigger asChild>
-                <Button>Ajouter un fichier</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Ajouter un fichier</DialogTitle>
-                  <DialogDescription>Partition (PDF) ou audio</DialogDescription>
-                </DialogHeader>
-                <UploadForm
-                  songId={song.id}
-                  allGroups={allGroups}
-                  onUploaded={async () => {
-                    setUploadOpen(false)
-                    await router.invalidate()
-                  }}
-                />
-              </DialogContent>
-            </Dialog>
+            {isManager ? (
+              <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+                <DialogTrigger asChild>
+                  <Button>Ajouter un fichier</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Ajouter un fichier</DialogTitle>
+                    <DialogDescription>Partition (PDF) ou audio</DialogDescription>
+                  </DialogHeader>
+                  <UploadForm
+                    songId={song.id}
+                    allGroups={allGroups}
+                    onUploaded={async () => {
+                      setUploadOpen(false)
+                      await router.invalidate()
+                    }}
+                  />
+                </DialogContent>
+              </Dialog>
+            ) : null}
           </div>
         </CardHeader>
         <CardContent>
@@ -117,7 +124,7 @@ function SongDetailPage() {
                 <TableHead>Label</TableHead>
                 <TableHead>Groupes</TableHead>
                 <TableHead className="w-0" />
-                <TableHead className="w-0" />
+                {isManager ? <TableHead className="w-0" /> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -126,12 +133,13 @@ function SongDetailPage() {
                   key={a.id}
                   asset={a as AssetWithGroups}
                   allGroups={allGroups}
+                  isManager={isManager}
                   onChanged={() => router.invalidate()}
                 />
               ))}
               {assets.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  <TableCell colSpan={isManager ? 5 : 4} className="text-center text-muted-foreground">
                     Aucun fichier pour l'instant
                   </TableCell>
                 </TableRow>
@@ -147,10 +155,12 @@ function SongDetailPage() {
 function AssetRow({
   asset,
   allGroups,
+  isManager,
   onChanged,
 }: {
   asset: AssetWithGroups
   allGroups: Array<{ id: string; name: string }>
+  isManager: boolean
   onChanged: () => void
 }) {
   const confirm = useConfirm()
@@ -178,50 +188,52 @@ function AssetRow({
             ))
           )}
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <button className="mt-1 text-xs text-muted-foreground hover:underline">Modifier</button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Groupes du fichier</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              Aucun groupe coché = visible par tout le monde via un lien de partage.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              {allGroups.map((grp) => (
-                <label key={grp.id} className="flex items-center gap-1.5 text-sm">
-                  <Checkbox
-                    checked={selected.has(grp.id)}
-                    onCheckedChange={(checked) => {
-                      const next = new Set(selected)
-                      if (checked === true) next.add(grp.id)
-                      else next.delete(grp.id)
-                      setSelected(next)
-                    }}
-                  />
-                  {grp.name}
-                </label>
-              ))}
-              {allGroups.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Aucun groupe créé pour l'instant</p>
-              ) : null}
-            </div>
-            <Button
-              disabled={saving}
-              onClick={async () => {
-                setSaving(true)
-                await setAssetGroupsFn({ data: { assetId: asset.id, groupIds: [...selected] } })
-                setSaving(false)
-                setOpen(false)
-                onChanged()
-              }}
-            >
-              {saving ? 'Enregistrement…' : 'Enregistrer'}
-            </Button>
-          </DialogContent>
-        </Dialog>
+        {isManager ? (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <button className="mt-1 text-xs text-muted-foreground hover:underline">Modifier</button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Groupes du fichier</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                Aucun groupe coché = visible par tout le monde via un lien de partage.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {allGroups.map((grp) => (
+                  <label key={grp.id} className="flex items-center gap-1.5 text-sm">
+                    <Checkbox
+                      checked={selected.has(grp.id)}
+                      onCheckedChange={(checked) => {
+                        const next = new Set(selected)
+                        if (checked === true) next.add(grp.id)
+                        else next.delete(grp.id)
+                        setSelected(next)
+                      }}
+                    />
+                    {grp.name}
+                  </label>
+                ))}
+                {allGroups.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Aucun groupe créé pour l'instant</p>
+                ) : null}
+              </div>
+              <Button
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true)
+                  await setAssetGroupsFn({ data: { assetId: asset.id, groupIds: [...selected] } })
+                  setSaving(false)
+                  setOpen(false)
+                  onChanged()
+                }}
+              >
+                {saving ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </TableCell>
       <TableCell>
         <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
@@ -244,23 +256,25 @@ function AssetRow({
           </DialogContent>
         </Dialog>
       </TableCell>
-      <TableCell>
-        <button
-          className="text-xs text-destructive hover:underline"
-          onClick={async () => {
-            const ok = await confirm({
-              title: 'Supprimer ce fichier',
-              description: 'Le fichier sera supprimé définitivement.',
-              confirmLabel: 'Supprimer',
-            })
-            if (!ok) return
-            await deleteAssetFn({ data: { assetId: asset.id } })
-            onChanged()
-          }}
-        >
-          Supprimer
-        </button>
-      </TableCell>
+      {isManager ? (
+        <TableCell>
+          <button
+            className="text-xs text-destructive hover:underline"
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Supprimer ce fichier',
+                description: 'Le fichier sera supprimé définitivement.',
+                confirmLabel: 'Supprimer',
+              })
+              if (!ok) return
+              await deleteAssetFn({ data: { assetId: asset.id } })
+              onChanged()
+            }}
+          >
+            Supprimer
+          </button>
+        </TableCell>
+      ) : null}
     </TableRow>
   )
 }

@@ -7,7 +7,7 @@ import {
   primaryKey,
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
-import { organization } from './auth'
+import { organization, member, invitation } from './auth'
 
 export const assetKind = pgEnum('asset_kind', ['score', 'audio'])
 export const assetStatus = pgEnum('asset_status', ['uploading', 'ready', 'failed'])
@@ -76,6 +76,34 @@ export const assetGroup = pgTable(
       .references(() => group.id, { onDelete: 'cascade' }),
   },
   (t) => [primaryKey({ columns: [t.assetId, t.groupId] })],
+)
+
+// Groups granted to a pending invitation; copied into memberGroup on acceptance
+// (no member row exists yet for a pending invite).
+export const invitationGroup = pgTable(
+  'invitation_group',
+  {
+    invitationId: text('invitation_id')
+      .notNull()
+      .references(() => invitation.id, { onDelete: 'cascade' }),
+    groupId: text('group_id')
+      .notNull()
+      .references(() => group.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.invitationId, t.groupId] })],
+)
+
+export const memberGroup = pgTable(
+  'member_group',
+  {
+    memberId: text('member_id')
+      .notNull()
+      .references(() => member.id, { onDelete: 'cascade' }),
+    groupId: text('group_id')
+      .notNull()
+      .references(() => group.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.memberId, t.groupId] })],
 )
 
 export const playlist = pgTable('playlist', {

@@ -36,6 +36,20 @@
       "when": 1786199248025,
       "tag": "0004_lying_mephisto",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786215333393,
+      "tag": "0005_watery_wild_pack",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786215784750,
+      "tag": "0006_special_warlock",
+      "breakpoints": true
     }
   ]
 }
