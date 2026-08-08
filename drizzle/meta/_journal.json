@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1786180946115,
+      "tag": "0000_even_maggott",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786184411407,
+      "tag": "0001_futuristic_thanos",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786184824056,
+      "tag": "0002_cool_starhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786186380969,
+      "tag": "0003_wooden_yellow_claw",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786199248025,
+      "tag": "0004_lying_mephisto",
+      "breakpoints": true
+    }
+  ]
+}

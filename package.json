@@ -1,0 +1,65 @@
+{
+  "name": "chorale",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.20.0",
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "start": "node .output/server/index.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1106.0",
+    "@aws-sdk/s3-request-presigner": "^3.1106.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/react-devtools": "latest",
+    "@tanstack/react-form": "^1.33.3",
+    "@tanstack/react-router": "latest",
+    "@tanstack/react-router-devtools": "latest",
+    "@tanstack/react-start": "^1.168.40",
+    "better-auth": "^1.6.26",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "effect": "^3.22.1",
+    "lucide-react": "^1.30.0",
+    "pdfjs-dist": "5.4.296",
+    "pg": "^8.22.0",
+    "radix-ui": "^1.6.7",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-pdf": "^10.4.1",
+    "shadcn": "^4.16.2",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.1.18",
+    "tw-animate-css": "^1.4.0",
+    "wavesurfer.js": "^7.12.11"
+  },
+  "devDependencies": {
+    "@tanstack/devtools-vite": "latest",
+    "@tanstack/router-cli": "^1.132.0",
+    "@tanstack/router-plugin": "latest",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.21.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "drizzle-kit": "^0.31.10",
+    "nitro": "3.0.260610-beta",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "lightningcss"
+    ]
+  }
+}
