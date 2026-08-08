@@ -7,6 +7,9 @@ const client = new S3Client({
   region: process.env.S3_REGION,
   endpoint: process.env.S3_ENDPOINT,
   forcePathStyle: true,
+  // Garage doesn't support the SDK's default flexible-checksum extension (x-amz-checksum-*),
+  // which the SDK otherwise adds to presigned PUT URLs and gets rejected with 400.
+  requestChecksumCalculation: 'WHEN_REQUIRED',
   credentials: {
     accessKeyId: process.env.S3_ACCESS_KEY_ID!,
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
