@@ -39,6 +39,7 @@ export class Members extends Context.Tag('Members')<
     readonly updateMemberRole: (
       headers: Headers,
       orgId: string,
+      callerUserId: string,
       memberId: string,
       role: InviteRole,
     ) => Effect.Effect<void, ValidationError>
@@ -180,11 +181,24 @@ export const MembersLive = Layer.effect(
           catch: (cause) => new ValidationError({ message: (cause as Error).message ?? 'Révocation impossible' }),
         }).pipe(Effect.asVoid),
 
-      updateMemberRole: (headers, orgId, memberId, role) =>
-        Effect.tryPromise({
-          try: () => auth.api.updateMemberRole({ headers, body: { organizationId: orgId, memberId, role } }),
-          catch: (cause) => new ValidationError({ message: (cause as Error).message ?? 'Modification impossible' }),
-        }).pipe(Effect.asVoid),
+      updateMemberRole: (headers, orgId, callerUserId, memberId, role) =>
+        Effect.promise(() =>
+          db.select({ userId: member.userId }).from(member).where(eq(member.id, memberId)).limit(1),
+        ).pipe(
+          Effect.flatMap(([target]) =>
+            target?.userId === callerUserId
+              ? Effect.fail(new ValidationError({ message: 'Vous ne pouvez pas modifier votre propre rôle' }))
+              : Effect.void,
+          ),
+          Effect.flatMap(() =>
+            Effect.tryPromise({
+              try: () => auth.api.updateMemberRole({ headers, body: { organizationId: orgId, memberId, role } }),
+              catch: (cause) =>
+                new ValidationError({ message: (cause as Error).message ?? 'Modification impossible' }),
+            }),
+          ),
+          Effect.asVoid,
+        ),
 
       updateMemberGroups: (memberId, groupIds) =>
         Effect.promise(async () => {

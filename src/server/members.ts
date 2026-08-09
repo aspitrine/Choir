@@ -88,7 +88,7 @@ export const updateMemberRoleFn = createServerFn({ method: 'POST' })
         const access = yield* Access
         const { orgId, userId } = yield* auth.requireActiveOrganizationId(headers())
         yield* access.requireManager(orgId, userId)
-        yield* members.updateMemberRole(headers(), orgId, data.memberId, data.role)
+        yield* members.updateMemberRole(headers(), orgId, userId, data.memberId, data.role)
       }),
     ),
   )

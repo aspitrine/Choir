@@ -31,6 +31,7 @@ import {
   getMyRoleFn,
 } from '@/server/members'
 import { listGroupsFn } from '@/server/groups'
+import { useSession } from '@/lib/auth-client'
 import type { InviteRole } from '@/services/Members'
 import type { Page } from '@/domain/pagination'
 
@@ -92,6 +93,7 @@ function MembersPage() {
   const { members, invitations, allGroups, role } = Route.useLoaderData()
   const router = useRouter()
   const confirm = useConfirm()
+  const { data: session } = useSession()
   const isManager = role === 'owner' || role === 'admin'
   const [inviteOpen, setInviteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -144,7 +146,13 @@ function MembersPage() {
         ) : null}
       </header>
 
-      <MembersActiveCard key={`members-${refreshKey}`} initial={members} allGroups={allGroups} isManager={isManager} />
+      <MembersActiveCard
+        key={`members-${refreshKey}`}
+        initial={members}
+        allGroups={allGroups}
+        isManager={isManager}
+        currentUserId={session?.user.id}
+      />
 
       <PendingInvitationsCard key={`invitations-${refreshKey}`} initial={invitations} isManager={isManager} />
 
@@ -187,10 +195,12 @@ function MembersActiveCard({
   initial,
   allGroups,
   isManager,
+  currentUserId,
 }: {
   initial: Page<MemberRow>
   allGroups: Array<{ id: string; name: string }>
   isManager: boolean
+  currentUserId: string | undefined
 }) {
   const [result, setResult] = useState(initial)
   const [searchInput, setSearchInput] = useState('')
@@ -242,7 +252,14 @@ function MembersActiveCard({
           </TableHeader>
           <TableBody>
             {result.rows.map((row) => (
-              <MemberRow key={row.member.id} row={row} allGroups={allGroups} isManager={isManager} onChanged={refetch} />
+              <MemberRow
+                key={row.member.id}
+                row={row}
+                allGroups={allGroups}
+                isManager={isManager}
+                isSelf={row.user.id === currentUserId}
+                onChanged={refetch}
+              />
             ))}
             {result.rows.length === 0 ? (
               <TableRow>
@@ -388,11 +405,13 @@ function MemberRow({
   row,
   allGroups,
   isManager,
+  isSelf,
   onChanged,
 }: {
   row: MemberRow
   allGroups: Array<{ id: string; name: string }>
   isManager: boolean
+  isSelf: boolean
   onChanged: () => void
 }) {
   const confirm = useConfirm()
@@ -405,7 +424,7 @@ function MemberRow({
       <TableCell className="font-medium">{row.user.name}</TableCell>
       <TableCell className="text-muted-foreground">{row.user.email}</TableCell>
       <TableCell>
-        {isManager && row.member.role !== 'owner' ? (
+        {isManager && row.member.role !== 'owner' && !isSelf ? (
           <select
             className="rounded-md border bg-background px-2 py-1 text-sm"
             value={row.member.role}

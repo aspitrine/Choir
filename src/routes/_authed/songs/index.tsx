@@ -17,6 +17,7 @@ import { TablePager } from '@/components/table-pager'
 import { useAppForm } from '@/lib/form'
 import { CreateSongForm } from '@/domain/songs'
 import { listSongsFn, createSongFn } from '@/server/songs'
+import { getMyRoleFn } from '@/server/members'
 
 const SongsSearch = Schema.Struct({
   q: Schema.optional(Schema.String),
@@ -26,16 +27,20 @@ const SongsSearch = Schema.Struct({
 export const Route = createFileRoute('/_authed/songs/')({
   validateSearch: (search) => Schema.decodeUnknownSync(SongsSearch)(search),
   loaderDeps: ({ search }) => ({ q: search.q ?? '', page: search.page ?? 1 }),
-  loader: ({ deps }) => listSongsFn({ data: deps }),
+  loader: async ({ deps }) => {
+    const [page, role] = await Promise.all([listSongsFn({ data: deps }), getMyRoleFn()])
+    return { ...page, role }
+  },
   component: SongsPage,
 })
 
 function SongsPage() {
-  const { rows: songs, total, page, pageSize } = Route.useLoaderData()
+  const { rows: songs, total, page, pageSize, role } = Route.useLoaderData()
+  const isManager = role === 'owner' || role === 'admin'
   const { q } = Route.useSearch()
   const navigate = Route.useNavigate()
   const router = useRouter()
-  const [open, setOpen] = useState(total === 0)
+  const [open, setOpen] = useState(isManager && total === 0)
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const [searchInput, setSearchInput] = useState(q ?? '')
@@ -57,23 +62,25 @@ function SongsPage() {
           <h1 className="text-xl font-bold">Chants</h1>
           <p className="text-sm text-muted-foreground">{total} chant(s)</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button>Nouveau chant</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nouveau chant</DialogTitle>
-              <DialogDescription>Titre requis, le reste est optionnel</DialogDescription>
-            </DialogHeader>
-            <CreateSongDialogForm
-              onCreated={async () => {
-                setOpen(false)
-                await router.invalidate()
-              }}
-            />
-          </DialogContent>
-        </Dialog>
+        {isManager ? (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button>Nouveau chant</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Nouveau chant</DialogTitle>
+                <DialogDescription>Titre requis, le reste est optionnel</DialogDescription>
+              </DialogHeader>
+              <CreateSongDialogForm
+                onCreated={async () => {
+                  setOpen(false)
+                  await router.invalidate()
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </header>
 
       <Card>
