@@ -31,7 +31,7 @@ import {
   getMyRoleFn,
 } from '@/server/members'
 import { listGroupsFn } from '@/server/groups'
-import { useSession } from '@/lib/auth-client'
+import { authClient, useSession } from '@/lib/auth-client'
 import type { InviteRole } from '@/services/Members'
 import type { Page } from '@/domain/pagination'
 
@@ -94,6 +94,7 @@ function MembersPage() {
   const router = useRouter()
   const confirm = useConfirm()
   const { data: session } = useSession()
+  const { data: activeOrganization } = authClient.useActiveOrganization()
   const isManager = role === 'owner' || role === 'admin'
   const [inviteOpen, setInviteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -134,6 +135,7 @@ function MembersPage() {
               {inviteOpen ? (
                 <InviteDialogForm
                   allGroups={allGroups}
+                  orgName={activeOrganization?.name}
                   onClose={() => {
                     setInviteOpen(false)
                     router.invalidate()
@@ -154,7 +156,12 @@ function MembersPage() {
         currentUserId={session?.user.id}
       />
 
-      <PendingInvitationsCard key={`invitations-${refreshKey}`} initial={invitations} isManager={isManager} />
+      <PendingInvitationsCard
+        key={`invitations-${refreshKey}`}
+        initial={invitations}
+        isManager={isManager}
+        orgName={activeOrganization?.name}
+      />
 
       {role === 'owner' ? (
         <Card className="border-destructive/40">
@@ -281,7 +288,15 @@ function MembersActiveCard({
   )
 }
 
-function PendingInvitationsCard({ initial, isManager }: { initial: Page<InvitationRow>; isManager: boolean }) {
+function PendingInvitationsCard({
+  initial,
+  isManager,
+  orgName,
+}: {
+  initial: Page<InvitationRow>
+  isManager: boolean
+  orgName: string | undefined
+}) {
   const confirm = useConfirm()
   const [result, setResult] = useState(initial)
   const [searchInput, setSearchInput] = useState('')
@@ -356,9 +371,7 @@ function PendingInvitationsCard({ initial, isManager }: { initial: Page<Invitati
                   </div>
                 </TableCell>
                 <TableCell>
-                  <CopyLinkButton
-                    url={`${origin}/accept-invite/${invitation.id}?email=${encodeURIComponent(invitation.email)}`}
-                  />
+                  <CopyLinkButton url={buildInviteLink(origin, invitation.id, invitation.email, orgName)} />
                 </TableCell>
                 {isManager ? (
                   <TableCell>
@@ -532,11 +545,21 @@ async function copyInviteLink(link: string) {
   }
 }
 
+// `org` is only used to render a nicer link preview (title/description) when the
+// link is shared on messaging apps — the actual invite is still resolved by id.
+function buildInviteLink(origin: string, invitationId: string, email: string, orgName: string | undefined) {
+  const params = new URLSearchParams({ email })
+  if (orgName) params.set('org', orgName)
+  return `${origin}/accept-invite/${invitationId}?${params.toString()}`
+}
+
 function InviteDialogForm({
   allGroups,
+  orgName,
   onClose,
 }: {
   allGroups: Array<{ id: string; name: string }>
+  orgName: string | undefined
   onClose: () => void
 }) {
   const [firstName, setFirstName] = useState('')
@@ -563,7 +586,7 @@ function InviteDialogForm({
           groupIds: [...groupIds],
         },
       })
-      const link = `${window.location.origin}/accept-invite/${created.id}?email=${encodeURIComponent(email.trim())}`
+      const link = buildInviteLink(window.location.origin, created.id, email.trim(), orgName)
       setInviteLink(link)
       await copyInviteLink(link)
     } catch {

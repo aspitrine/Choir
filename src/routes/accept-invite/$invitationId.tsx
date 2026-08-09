@@ -8,10 +8,33 @@ import { Label } from '@/components/ui/label'
 import { authClient, useSession, signIn, signOut } from '@/lib/auth-client'
 import { finalizeInviteAcceptanceFn } from '@/server/members'
 
-const AcceptInviteSearch = Schema.Struct({ email: Schema.optional(Schema.String) })
+const AcceptInviteSearch = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  org: Schema.optional(Schema.String),
+})
 
 export const Route = createFileRoute('/accept-invite/$invitationId')({
   validateSearch: (search) => Schema.decodeUnknownSync(AcceptInviteSearch)(search),
+  head: ({ match }) => {
+    const orgName = match.search.org
+    const title = orgName ? `Invitation à rejoindre ${orgName} · Chorale` : 'Invitation · Chorale'
+    const description = orgName
+      ? `Vous êtes invité·e à rejoindre ${orgName} sur Chorale.`
+      : 'Vous êtes invité·e à rejoindre une chorale sur Chorale.'
+    return {
+      meta: [
+        { title },
+        { name: 'description', content: description },
+        { property: 'og:title', content: title },
+        { property: 'og:description', content: description },
+        { property: 'og:type', content: 'website' },
+        { property: 'og:site_name', content: 'Chorale' },
+        { name: 'twitter:card', content: 'summary' },
+        { name: 'twitter:title', content: title },
+        { name: 'twitter:description', content: description },
+      ],
+    }
+  },
   component: AcceptInvitePage,
 })
 
@@ -26,7 +49,7 @@ function roleLabel(role: string) {
 
 function AcceptInvitePage() {
   const { invitationId } = Route.useParams()
-  const { email: invitedEmail } = Route.useSearch()
+  const { email: invitedEmail, org: orgName } = Route.useSearch()
   const navigate = useNavigate()
   const { data: session, isPending: sessionPending } = useSession()
 
@@ -74,7 +97,7 @@ function AcceptInvitePage() {
     <div className="flex min-h-screen items-center justify-center p-8">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Invitation</CardTitle>
+          <CardTitle>{orgName ? `Rejoindre ${orgName}` : 'Invitation'}</CardTitle>
           <CardDescription>
             {invitedEmail ? `Pour ${invitedEmail}` : 'Rejoindre une chorale sur Chorale'}
           </CardDescription>
