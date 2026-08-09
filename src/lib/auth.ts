@@ -40,11 +40,19 @@ export const auth = betterAuth({
     }),
     genericOAuth({
       config: [
-        microsoftEntraId({
-          clientId: process.env.MICROSOFT_CLIENT_ID!,
-          clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
-          tenantId: process.env.MICROSOFT_TENANT_ID!,
-        }),
+        {
+          ...microsoftEntraId({
+            clientId: process.env.MICROSOFT_CLIENT_ID!,
+            clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
+            tenantId: process.env.MICROSOFT_TENANT_ID!,
+          }),
+          // Personal Microsoft accounts don't reliably return name/given_name/family_name
+          // from the OIDC userinfo endpoint — fall back to the email's local part rather
+          // than fail sign-in on a required `name` field.
+          mapProfileToUser: (profile: { name?: string; email?: string }) => ({
+            name: profile.name || profile.email?.split('@')[0] || 'Utilisateur',
+          }),
+        },
       ],
     }),
     // Must stay last: handles cookie writes for server-side auth calls.
