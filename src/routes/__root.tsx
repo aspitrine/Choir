@@ -8,6 +8,7 @@ import {
 
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
+import { Toaster } from 'sonner'
 
 import '../styles.css'
 
@@ -26,6 +27,7 @@ function RootComponent() {
   return (
     <RootDocument>
       <Outlet />
+      <Toaster richColors position="bottom-right" />
       <TanStackDevtools
         config={{ position: 'bottom-right' }}
         plugins={[

@@ -1,5 +1,6 @@
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
 import { useEffect, useState, type FormEvent } from 'react'
+import { toast } from 'sonner'
 import { Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -94,6 +95,11 @@ function MembersPage() {
   const isManager = role === 'owner' || role === 'admin'
   const [inviteOpen, setInviteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // Bumped whenever an invite is created (in a sibling component, so the lists below
+  // can't reach it directly) — remounts the list cards to pick up fresh data. Plain
+  // router.invalidate() only refreshes this route's own loaderData, which the cards
+  // only read once at mount into local state, so it doesn't reach them by itself.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   return (
     <div className="w-full space-y-6 p-8">
@@ -103,7 +109,16 @@ function MembersPage() {
           <p className="text-sm text-muted-foreground">Qui a accès à cette chorale, et avec quels droits</p>
         </div>
         {isManager ? (
-          <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+          <Dialog
+            open={inviteOpen}
+            onOpenChange={(open) => {
+              setInviteOpen(open)
+              if (!open) {
+                router.invalidate()
+                setRefreshKey((k) => k + 1)
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button>Inviter quelqu'un</Button>
             </DialogTrigger>
@@ -114,21 +129,24 @@ function MembersPage() {
                   Génère un lien à partager vous-même (aucun email n'est envoyé)
                 </DialogDescription>
               </DialogHeader>
-              <InviteDialogForm
-                allGroups={allGroups}
-                onCreated={async () => {
-                  setInviteOpen(false)
-                  await router.invalidate()
-                }}
-              />
+              {inviteOpen ? (
+                <InviteDialogForm
+                  allGroups={allGroups}
+                  onClose={() => {
+                    setInviteOpen(false)
+                    router.invalidate()
+                    setRefreshKey((k) => k + 1)
+                  }}
+                />
+              ) : null}
             </DialogContent>
           </Dialog>
         ) : null}
       </header>
 
-      <MembersActiveCard initial={members} allGroups={allGroups} isManager={isManager} />
+      <MembersActiveCard key={`members-${refreshKey}`} initial={members} allGroups={allGroups} isManager={isManager} />
 
-      <PendingInvitationsCard initial={invitations} isManager={isManager} />
+      <PendingInvitationsCard key={`invitations-${refreshKey}`} initial={invitations} isManager={isManager} />
 
       {role === 'owner' ? (
         <Card className="border-destructive/40">
@@ -486,12 +504,21 @@ function MemberRow({
   )
 }
 
+async function copyInviteLink(link: string) {
+  try {
+    await navigator.clipboard.writeText(link)
+    toast.success('Lien copié dans le presse-papier')
+  } catch {
+    toast.error('Copie impossible — sélectionnez le lien manuellement')
+  }
+}
+
 function InviteDialogForm({
   allGroups,
-  onCreated,
+  onClose,
 }: {
   allGroups: Array<{ id: string; name: string }>
-  onCreated: () => void
+  onClose: () => void
 }) {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -500,6 +527,7 @@ function InviteDialogForm({
   const [groupIds, setGroupIds] = useState<Set<string>>(new Set())
   const [serverError, setServerError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [inviteLink, setInviteLink] = useState<string | null>(null)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -507,7 +535,7 @@ function InviteDialogForm({
     setServerError(null)
     setSubmitting(true)
     try {
-      await createInviteFn({
+      const created = await createInviteFn({
         data: {
           email: email.trim(),
           firstName: firstName.trim() || null,
@@ -516,12 +544,33 @@ function InviteDialogForm({
           groupIds: [...groupIds],
         },
       })
-      onCreated()
+      const link = `${window.location.origin}/accept-invite/${created.id}?email=${encodeURIComponent(email.trim())}`
+      setInviteLink(link)
+      await copyInviteLink(link)
     } catch {
       setServerError('Invitation impossible (email déjà invité ou déjà membre ?)')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  if (inviteLink) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Lien copié — partagez-le vous-même avec la personne invitée.
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 truncate rounded-md border bg-muted px-2 py-1.5 text-xs">{inviteLink}</code>
+          <Button type="button" variant="outline" size="sm" onClick={() => copyInviteLink(inviteLink)}>
+            Copier
+          </Button>
+        </div>
+        <Button type="button" className="w-full" onClick={onClose}>
+          Fermer
+        </Button>
+      </div>
+    )
   }
 
   return (
