@@ -7,6 +7,7 @@ import { Assets } from '../services/Assets'
 import { Access } from '../services/Access'
 import { Storage } from '../services/Storage'
 import { AppRuntime } from '../services/Runtime'
+import { BySong, decodeInput } from '../domain/inputs'
 import { CreateSongInput, UpdateSongInput } from '../domain/songs'
 import { PageParams } from '../domain/pagination'
 
@@ -39,7 +40,7 @@ export const listAllSongsFn = createServerFn({ method: 'GET' }).handler(() =>
 )
 
 export const getSongFn = createServerFn({ method: 'GET' })
-  .validator((data: { songId: string }) => data)
+  .validator(decodeInput(BySong))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -99,15 +100,17 @@ export const updateSongFn = createServerFn({ method: 'POST' })
   )
 
 export const deleteSongFn = createServerFn({ method: 'POST' })
-  .validator((data: { songId: string }) => data)
+  .validator(decodeInput(BySong))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
         const auth = yield* AuthService
         const songs = yield* Songs
+        const assets = yield* Assets
         const access = yield* Access
         const { orgId, userId } = yield* auth.requireActiveOrganizationId(headers())
         yield* access.requireManager(orgId, userId)
+        yield* assets.removeAllForSong(orgId, data.songId)
         yield* songs.remove(orgId, data.songId)
       }),
     ),

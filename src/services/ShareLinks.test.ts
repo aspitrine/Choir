@@ -3,7 +3,7 @@ import { Effect, Layer } from 'effect'
 import { eq } from 'drizzle-orm'
 import { ShareLinks, ShareLinksLive } from './ShareLinks'
 import { NotFoundError } from '../domain/errors'
-import { shareLink } from '../db/schema'
+import { shareLink, song } from '../db/schema'
 import { createTestDb, failWith, runWith } from '../test/db'
 import { seedAsset, seedGroup, seedOrg, seedPlaylist, seedSong } from '../test/fixtures'
 
@@ -144,5 +144,29 @@ describe('ShareLinks', () => {
     expect(byId.get(a.id)).toEqual(['Basse'])
     expect(byId.get(b.id)).toEqual(['Alto', 'Soprano'])
   })
-})
 
+  it('exposes only public fields to anonymous visitors', async () => {
+    const { org, playlist } = await choir()
+    await t.db.update(song).set({ notes: 'Ne pas diffuser : soliste malade' })
+    const resolved = await resolve((await create(org.id, playlist.id)).token)
+
+    expect(Object.keys(resolved.playlist).sort()).toEqual(['description', 'name'])
+    for (const item of resolved.items) {
+      expect(Object.keys(item.song).sort()).toEqual(['arranger', 'composer', 'id', 'key', 'tempo', 'title'])
+    }
+    expect(JSON.stringify(resolved)).not.toContain('soliste malade')
+    expect(JSON.stringify(resolved)).not.toContain(org.id)
+  })
+
+  it('hides files that are still uploading or failed', async () => {
+    const { org, playlist, assets } = await choir()
+    const [first] = await t.db.select().from(song).where(eq(song.title, 'Premier'))
+    const pending = await seedAsset(t.db, first!.id, { status: 'uploading' })
+    const failed = await seedAsset(t.db, first!.id, { status: 'failed' })
+    const ids = assetIds(await resolve((await create(org.id, playlist.id)).token))
+
+    expect(ids).not.toContain(pending.id)
+    expect(ids).not.toContain(failed.id)
+    expect(ids).toHaveLength(Object.keys(assets).length)
+  })
+})

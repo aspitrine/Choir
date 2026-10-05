@@ -15,6 +15,10 @@ export const auth = betterAuth({
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     },
   },
+  // Accepting goes through acceptInvitationFn, which also checks the secret from
+  // the invite link: this endpoint only needs the invitation id, which members
+  // can list. Server-side auth.api calls are unaffected by disabledPaths.
+  disabledPaths: ['/organization/accept-invitation'],
   emailAndPassword: {
     // Fallback for invitees without Google/Microsoft. No mail server, so no
     // verification email — the private invite link is the trust anchor instead.

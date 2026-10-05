@@ -2,11 +2,12 @@ import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import { Effect, Schema } from 'effect'
 import { AuthService } from '../services/Auth'
-import { Members, type InviteRole } from '../services/Members'
+import { Members } from '../services/Members'
 import { Access } from '../services/Access'
 import { Assets } from '../services/Assets'
 import { Storage } from '../services/Storage'
 import { AppRuntime } from '../services/Runtime'
+import { ByInvitation, ByMember, CreateInviteInput, AcceptInvitationInput, UpdateMemberGroupsInput, UpdateMemberRoleInput, decodeInput } from '../domain/inputs'
 import { PageParams } from '../domain/pagination'
 import { ForbiddenError } from '../domain/errors'
 
@@ -21,7 +22,10 @@ export const searchMembersFn = createServerFn({ method: 'GET' })
       Effect.gen(function* () {
         const auth = yield* AuthService
         const members = yield* Members
-        const { orgId } = yield* auth.requireActiveOrganizationId(headers())
+        const access = yield* Access
+        const { orgId, userId } = yield* auth.requireActiveOrganizationId(headers())
+        // Pending invitations carry the invite secret; member rows carry emails.
+        yield* access.requireManager(orgId, userId)
         return yield* members.search(orgId, data)
       }),
     ),
@@ -34,7 +38,10 @@ export const searchInvitationsFn = createServerFn({ method: 'GET' })
       Effect.gen(function* () {
         const auth = yield* AuthService
         const members = yield* Members
-        const { orgId } = yield* auth.requireActiveOrganizationId(headers())
+        const access = yield* Access
+        const { orgId, userId } = yield* auth.requireActiveOrganizationId(headers())
+        // Pending invitations carry the invite secret; member rows carry emails.
+        yield* access.requireManager(orgId, userId)
         return yield* members.searchInvitations(orgId, data)
       }),
     ),
@@ -42,13 +49,7 @@ export const searchInvitationsFn = createServerFn({ method: 'GET' })
 
 export const createInviteFn = createServerFn({ method: 'POST' })
   .validator(
-    (data: {
-      email: string
-      firstName: string | null
-      lastName: string | null
-      role: InviteRole
-      groupIds: Array<string>
-    }) => data,
+    decodeInput(CreateInviteInput),
   )
   .handler(({ data }) =>
     AppRuntime.runPromise(
@@ -64,7 +65,7 @@ export const createInviteFn = createServerFn({ method: 'POST' })
   )
 
 export const revokeInviteFn = createServerFn({ method: 'POST' })
-  .validator((data: { invitationId: string }) => data)
+  .validator(decodeInput(ByInvitation))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -79,7 +80,7 @@ export const revokeInviteFn = createServerFn({ method: 'POST' })
   )
 
 export const updateMemberRoleFn = createServerFn({ method: 'POST' })
-  .validator((data: { memberId: string; role: InviteRole }) => data)
+  .validator(decodeInput(UpdateMemberRoleInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -94,7 +95,7 @@ export const updateMemberRoleFn = createServerFn({ method: 'POST' })
   )
 
 export const updateMemberGroupsFn = createServerFn({ method: 'POST' })
-  .validator((data: { memberId: string; groupIds: Array<string> }) => data)
+  .validator(decodeInput(UpdateMemberGroupsInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -109,7 +110,7 @@ export const updateMemberGroupsFn = createServerFn({ method: 'POST' })
   )
 
 export const removeMemberFn = createServerFn({ method: 'POST' })
-  .validator((data: { memberId: string }) => data)
+  .validator(decodeInput(ByMember))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -123,18 +124,18 @@ export const removeMemberFn = createServerFn({ method: 'POST' })
     ),
   )
 
-// Called by the invitee right after authClient.organization.acceptInvitation() succeeds
-// client-side. The service checks the member row is the caller's own and the
-// invitation was accepted into that same organization.
-export const finalizeInviteAcceptanceFn = createServerFn({ method: 'POST' })
-  .validator((data: { memberId: string; invitationId: string }) => data)
+// The only way to accept an invitation: Better Auth's own accept endpoint is
+// disabled over HTTP (see lib/auth.ts) because it trusts the invitation id alone,
+// which any member can list, and password sign-ups don't prove email ownership.
+export const acceptInvitationFn = createServerFn({ method: 'POST' })
+  .validator(decodeInput(AcceptInvitationInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
         const auth = yield* AuthService
         const members = yield* Members
         const session = yield* auth.requireSession(headers())
-        yield* members.finalizeAcceptance(session.user.id, data.memberId, data.invitationId)
+        yield* members.acceptInvite(headers(), session.user.id, data.invitationId, data.secret)
       }),
     ),
   )

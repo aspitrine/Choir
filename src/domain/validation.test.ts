@@ -35,9 +35,32 @@ describe('CreateUploadIntentInput', () => {
     groupIds: [],
   }
 
-  it('accepts score and audio', () => {
+  it('accepts audio and PDF scores', () => {
     expect(Either.isRight(decode(CreateUploadIntentInput, intent))).toBe(true)
-    expect(Either.isRight(decode(CreateUploadIntentInput, { ...intent, kind: 'score' }))).toBe(true)
+    expect(
+      Either.isRight(
+        decode(CreateUploadIntentInput, { ...intent, kind: 'score', filename: 'a.pdf', contentType: 'application/pdf' }),
+      ),
+    ).toBe(true)
+  })
+
+  it.each(['text/html', 'image/svg+xml', 'application/javascript', 'audio/aiff', 'application/octet-stream'])(
+    'rejects %s, which storage would serve back as-is',
+    (contentType) => {
+      expect(Either.isLeft(decode(CreateUploadIntentInput, { ...intent, contentType }))).toBe(true)
+    },
+  )
+
+  it('rejects a kind that does not match the content type', () => {
+    expect(Either.isLeft(decode(CreateUploadIntentInput, { ...intent, kind: 'score' }))).toBe(true)
+    expect(
+      Either.isLeft(decode(CreateUploadIntentInput, { ...intent, kind: 'audio', contentType: 'application/pdf' })),
+    ).toBe(true)
+  })
+
+  it('rejects malformed group ids', () => {
+    expect(Either.isLeft(decode(CreateUploadIntentInput, { ...intent, groupIds: 'g1' }))).toBe(true)
+    expect(Either.isLeft(decode(CreateUploadIntentInput, { ...intent, groupIds: [42] }))).toBe(true)
   })
 
   it('rejects unknown kinds and empty filenames', () => {

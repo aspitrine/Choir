@@ -8,15 +8,19 @@ import { getSessionFn } from '../server/auth'
 import { getMyRoleFn } from '../server/members'
 
 export const Route = createFileRoute('/_authed')({
-  beforeLoad: async () => {
+  beforeLoad: async ({ location }) => {
     const session = await getSessionFn()
 
     if (!session) {
       throw redirect({ to: '/' })
     }
 
-    // No active org yet (e.g. just signed up) — role is simply unknown until one is picked.
+    // No role = no active org yet (e.g. just signed up) or no longer a member of it.
+    // Only the dashboard (with its org picker) makes sense then.
     const role = await getMyRoleFn().catch(() => null)
+    if (role === null && location.pathname !== '/dashboard') {
+      throw redirect({ to: '/dashboard' })
+    }
 
     return { session, role }
   },

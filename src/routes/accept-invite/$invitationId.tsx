@@ -6,9 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authClient, useSession, signIn, signOut } from '@/lib/auth-client'
-import { finalizeInviteAcceptanceFn } from '@/server/members'
+import { acceptInvitationFn } from '@/server/members'
 
 const AcceptInviteSearch = Schema.Struct({
+  // Secret proving the visitor received the link (not just the invitation id).
+  k: Schema.optional(Schema.String),
   email: Schema.optional(Schema.String),
   org: Schema.optional(Schema.String),
 })
@@ -49,7 +51,7 @@ function roleLabel(role: string) {
 
 function AcceptInvitePage() {
   const { invitationId } = Route.useParams()
-  const { email: invitedEmail, org: orgName } = Route.useSearch()
+  const { email: invitedEmail, org: orgName, k: secret } = Route.useSearch()
   const navigate = useNavigate()
   const { data: session, isPending: sessionPending } = useSession()
 
@@ -81,15 +83,13 @@ function AcceptInvitePage() {
   async function handleAccept() {
     setAccepting(true)
     setAcceptError(null)
-    const { data, error } = await authClient.organization.acceptInvitation({ invitationId })
-    if (error || !data) {
-      setAcceptError("Impossible d'accepter l'invitation.")
+    try {
+      await acceptInvitationFn({ data: { invitationId, secret: secret ?? '' } })
+    } catch {
+      setAcceptError("Impossible d'accepter l'invitation. Vérifiez que vous utilisez le lien complet reçu.")
       setAccepting(false)
       return
     }
-    await finalizeInviteAcceptanceFn({
-      data: { memberId: data.member.id, invitationId: data.invitation.id },
-    })
     navigate({ to: '/dashboard' })
   }
 

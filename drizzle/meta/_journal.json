@@ -57,6 +57,13 @@
       "when": 1791194373259,
       "tag": "0007_timestamptz",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791197178498,
+      "tag": "0008_invitation_secret",
+      "breakpoints": true
     }
   ]
 }

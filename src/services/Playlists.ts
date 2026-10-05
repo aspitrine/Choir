@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from 'effect'
 import { eq, and, asc, inArray } from 'drizzle-orm'
 import { Database } from './Database'
 import { playlist, playlistItem, playlistEventDate, song } from '../db/schema'
-import { NotFoundError } from '../domain/errors'
+import { NotFoundError, ValidationError } from '../domain/errors'
 
 export interface UpcomingPlaylist {
   playlist: typeof playlist.$inferSelect
@@ -31,6 +31,7 @@ export class Playlists extends Context.Tag('Playlists')<
       Array<{ itemId: string; position: number; song: typeof song.$inferSelect }>,
       NotFoundError
     >
+    /** The song must belong to the same organization as the playlist. */
     readonly addSong: (
       orgId: string,
       playlistId: string,
@@ -41,11 +42,12 @@ export class Playlists extends Context.Tag('Playlists')<
       playlistId: string,
       itemId: string,
     ) => Effect.Effect<void, NotFoundError>
+    /** `itemIdsInOrder` must list every item of the playlist exactly once. */
     readonly reorder: (
       orgId: string,
       playlistId: string,
-      itemIdsInOrder: Array<string>,
-    ) => Effect.Effect<void, NotFoundError>
+      itemIdsInOrder: ReadonlyArray<string>,
+    ) => Effect.Effect<void, NotFoundError | ValidationError>
     readonly listEventDates: (
       orgId: string,
       playlistId: string,
@@ -115,6 +117,18 @@ export const PlaylistsLive = Layer.effect(
       addSong: (orgId, playlistId, songId) =>
         get(orgId, playlistId).pipe(
           Effect.flatMap(() =>
+            Effect.promise(() =>
+              db
+                .select({ id: song.id })
+                .from(song)
+                .where(and(eq(song.id, songId), eq(song.organizationId, orgId)))
+                .limit(1),
+            ),
+          ),
+          Effect.flatMap(([row]) =>
+            row ? Effect.void : Effect.fail(new NotFoundError({ entity: 'song', id: songId })),
+          ),
+          Effect.flatMap(() =>
             Effect.promise(async () => {
               const existing = await db
                 .select({ position: playlistItem.position })
@@ -143,25 +157,43 @@ export const PlaylistsLive = Layer.effect(
       reorder: (orgId, playlistId, itemIdsInOrder) =>
         get(orgId, playlistId).pipe(
           Effect.flatMap(() =>
-            Effect.promise(async () => {
-              // Shift into a disjoint range first so the unique (playlistId, position) index never collides mid-update.
-              await Promise.all(
-                itemIdsInOrder.map((itemId, index) =>
-                  db
+            Effect.promise(() =>
+              db
+                .select({ id: playlistItem.id })
+                .from(playlistItem)
+                .where(eq(playlistItem.playlistId, playlistId)),
+            ),
+          ),
+          Effect.flatMap((current) => {
+            // A partial or duplicated list would leave positions colliding with
+            // untouched items (unique index) — e.g. a stale tab after an add.
+            const requested = new Set(itemIdsInOrder)
+            const isPermutation =
+              requested.size === itemIdsInOrder.length &&
+              requested.size === current.length &&
+              current.every((r) => requested.has(r.id))
+            return isPermutation
+              ? Effect.void
+              : Effect.fail(new ValidationError({ message: 'La playlist a changé, rechargez la page' }))
+          }),
+          Effect.flatMap(() =>
+            Effect.promise(() =>
+              db.transaction(async (tx) => {
+                // Shift into a disjoint range first so the unique (playlistId, position) index never collides mid-update.
+                for (const [index, itemId] of itemIdsInOrder.entries()) {
+                  await tx
                     .update(playlistItem)
                     .set({ position: -(index + 1) })
-                    .where(and(eq(playlistItem.id, itemId), eq(playlistItem.playlistId, playlistId))),
-                ),
-              )
-              await Promise.all(
-                itemIdsInOrder.map((itemId, index) =>
-                  db
+                    .where(and(eq(playlistItem.id, itemId), eq(playlistItem.playlistId, playlistId)))
+                }
+                for (const [index, itemId] of itemIdsInOrder.entries()) {
+                  await tx
                     .update(playlistItem)
                     .set({ position: index })
-                    .where(and(eq(playlistItem.id, itemId), eq(playlistItem.playlistId, playlistId))),
-                ),
-              )
-            }),
+                    .where(and(eq(playlistItem.id, itemId), eq(playlistItem.playlistId, playlistId)))
+                }
+              }),
+            ),
           ),
           Effect.asVoid,
         ),

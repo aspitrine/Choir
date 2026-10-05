@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import { Effect, Layer } from 'effect'
 import { eq } from 'drizzle-orm'
-import { Assets, AssetsLive } from './Assets'
+import { Assets, AssetsLive, safeFilename } from './Assets'
 import { NotFoundError, StorageError } from '../domain/errors'
 import { asset } from '../db/schema'
 import { createTestDb, fakeStorage, failWith, runWith, storageLayer, type FakeStorage } from '../test/db'
@@ -26,7 +26,7 @@ const intent = (songId: string, groupIds: Array<string> = []) => ({
   kind: 'audio' as const,
   label: 'Basse',
   filename: 'basse.mp3',
-  contentType: 'audio/mpeg',
+  contentType: 'audio/mpeg' as const,
   groupIds,
 })
 
@@ -133,5 +133,69 @@ describe('Assets', () => {
       await fail(Effect.flatMap(Assets, (s) => s.createUploadIntent(org.id, intent(song.id, [foreign.id])))),
     ).toBeInstanceOf(NotFoundError)
     expect(await t.db.select().from(asset)).toHaveLength(1)
+  })
+
+  it('keeps uploaded file names from shaping the storage key', async () => {
+    const org = await seedOrg(t.db)
+    const song = await seedSong(t.db, org.id, 'Ave')
+    const { assetId } = await run(
+      Effect.flatMap(Assets, (a) => a.createUploadIntent(org.id, { ...intent(song.id), filename: '../../../Église é.mp3' })),
+    )
+    const [row] = await t.db.select().from(asset).where(eq(asset.id, assetId))
+    expect(row!.storageKey).toBe(`org/${org.id}/song/${song.id}/${assetId}-Eglise_e.mp3`)
+  })
+
+  it('removes every object and row of a song, tolerating missing objects', async () => {
+    const org = await seedOrg(t.db)
+    const song = await seedSong(t.db, org.id, 'Ave')
+    const keep = await seedAsset(t.db, (await seedSong(t.db, org.id, 'Other')).id)
+    const [a, b] = [await seedAsset(t.db, song.id), await seedAsset(t.db, song.id)]
+    const removed: Array<string> = []
+    storage = fakeStorage({
+      remove: (key) =>
+        key === a.storageKey
+          ? Effect.fail(new StorageError({ cause: 'NoSuchKey' }))
+          : Effect.sync(() => {
+              removed.push(key)
+            }),
+    })
+
+    await run(Effect.flatMap(Assets, (s) => s.removeAllForSong(org.id, song.id)))
+    expect(removed).toEqual([b.storageKey])
+    expect((await t.db.select().from(asset)).map((r) => r.id)).toEqual([keep.id])
+  })
+
+  it('handles a song without files and refuses another organization song', async () => {
+    const org = await seedOrg(t.db, 'A')
+    const other = await seedOrg(t.db, 'B')
+    const empty = await seedSong(t.db, org.id, 'Vide')
+    await run(Effect.flatMap(Assets, (s) => s.removeAllForSong(org.id, empty.id)))
+
+    const foreign = await seedSong(t.db, other.id, 'X')
+    await seedAsset(t.db, foreign.id)
+    expect(await fail(Effect.flatMap(Assets, (s) => s.removeAllForSong(org.id, foreign.id)))).toBeInstanceOf(
+      NotFoundError,
+    )
+    expect(storage.removed).toEqual([])
+    expect(await t.db.select().from(asset)).toHaveLength(1)
+  })
+})
+
+describe('safeFilename', () => {
+  it.each([
+    ['basse.mp3', 'basse.mp3'],
+    ['Ave Maria (Basse 2).pdf', 'Ave_Maria_Basse_2_.pdf'],
+    ['../../etc/passwd', 'etc_passwd'],
+    ['.hidden', 'hidden'],
+    ['Chœur à 4 voix.mp3', 'Ch_ur_a_4_voix.mp3'],
+    ['???', 'file'],
+  ])('%s → %s', (input, expected) => {
+    expect(safeFilename(input)).toBe(expected)
+  })
+
+  it('caps the length while keeping the extension', () => {
+    const name = safeFilename(`${'a'.repeat(300)}.mp3`)
+    expect(name.length).toBe(120)
+    expect(name.endsWith('.mp3')).toBe(true)
   })
 })

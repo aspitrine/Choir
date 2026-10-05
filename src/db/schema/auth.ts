@@ -101,4 +101,8 @@ export const invitation = pgTable('invitation', {
   // Better Auth `invitation.additionalFields` (see organization plugin config in lib/auth.ts).
   firstName: text('first_name'),
   lastName: text('last_name'),
+  // Random secret carried by the invite link and checked on acceptance. Unknown
+  // to Better Auth's schema, so its endpoints (which members can call, e.g.
+  // list-invitations) never return it — the invitation id alone is not enough.
+  secret: text('secret'),
 })

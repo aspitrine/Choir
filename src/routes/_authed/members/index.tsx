@@ -64,6 +64,7 @@ type InvitationRow = {
     role: string
     firstName: string | null
     lastName: string | null
+    secret: string | null
   }
   groups: Array<{ id: string; name: string }>
 }
@@ -371,7 +372,7 @@ function PendingInvitationsCard({
                   </div>
                 </TableCell>
                 <TableCell>
-                  <CopyLinkButton url={buildInviteLink(origin, invitation.id, invitation.email, orgName)} />
+                  <CopyLinkButton url={buildInviteLink(origin, invitation.id, invitation.secret, invitation.email, orgName)} />
                 </TableCell>
                 {isManager ? (
                   <TableCell>
@@ -547,8 +548,15 @@ async function copyInviteLink(link: string) {
 
 // `org` is only used to render a nicer link preview (title/description) when the
 // link is shared on messaging apps — the actual invite is still resolved by id.
-function buildInviteLink(origin: string, invitationId: string, email: string, orgName: string | undefined) {
+function buildInviteLink(
+  origin: string,
+  invitationId: string,
+  secret: string | null,
+  email: string,
+  orgName: string | undefined,
+) {
   const params = new URLSearchParams({ email })
+  if (secret) params.set('k', secret)
   if (orgName) params.set('org', orgName)
   return `${origin}/accept-invite/${invitationId}?${params.toString()}`
 }
@@ -586,7 +594,7 @@ function InviteDialogForm({
           groupIds: [...groupIds],
         },
       })
-      const link = buildInviteLink(window.location.origin, created.id, email.trim(), orgName)
+      const link = buildInviteLink(window.location.origin, created.id, created.secret, email.trim(), orgName)
       setInviteLink(link)
       await copyInviteLink(link)
     } catch {

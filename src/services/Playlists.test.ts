@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import { Effect, Layer } from 'effect'
 import { Playlists, PlaylistsLive } from './Playlists'
-import { NotFoundError } from '../domain/errors'
+import { NotFoundError, ValidationError } from '../domain/errors'
 import { createTestDb, failWith, runWith } from '../test/db'
 import { seedOrg, seedPlaylist, seedSong } from '../test/fixtures'
 
@@ -112,5 +112,43 @@ describe('Playlists', () => {
       nextEventDate: null,
       eventDateCount: 0,
     })
+  })
+
+  it('refuses to add a song of another organization', async () => {
+    const org = await seedOrg(t.db, 'A')
+    const other = await seedOrg(t.db, 'B')
+    const p = await seedPlaylist(t.db, org.id, 'P')
+    const foreign = await seedSong(t.db, other.id, 'Secret')
+
+    expect(await fail(Effect.flatMap(Playlists, (s) => s.addSong(org.id, p.id, foreign.id)))).toBeInstanceOf(
+      NotFoundError,
+    )
+    expect(await run(Effect.flatMap(Playlists, (s) => s.listItems(org.id, p.id)))).toEqual([])
+  })
+
+  it('rejects a reorder that is not a permutation of the current items', async () => {
+    const org = await seedOrg(t.db)
+    const [a, b, c] = [
+      await seedSong(t.db, org.id, 'A'),
+      await seedSong(t.db, org.id, 'B'),
+      await seedSong(t.db, org.id, 'C'),
+    ]
+    const p = await seedPlaylist(t.db, org.id, 'P', [a.id, b.id, c.id])
+    const other = await seedPlaylist(t.db, org.id, 'Other', [a.id])
+    const items = await run(Effect.flatMap(Playlists, (s) => s.listItems(org.id, p.id)))
+    const [otherItem] = await run(Effect.flatMap(Playlists, (s) => s.listItems(org.id, other.id)))
+    const ids = items.map((i) => i.itemId)
+
+    for (const attempt of [
+      [ids[2]!, ids[0]!], // partial (stale tab)
+      [ids[0]!, ids[0]!, ids[1]!], // duplicate
+      [ids[0]!, ids[1]!, otherItem!.itemId], // item of another playlist
+      [...ids, ids[0]!],
+    ]) {
+      const err = await fail(Effect.flatMap(Playlists, (s) => s.reorder(org.id, p.id, attempt)))
+      expect(err).toBeInstanceOf(ValidationError)
+    }
+    const after = await run(Effect.flatMap(Playlists, (s) => s.listItems(org.id, p.id)))
+    expect(titles(after)).toEqual(['A', 'B', 'C'])
   })
 })

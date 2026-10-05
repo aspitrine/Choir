@@ -32,16 +32,32 @@ export class Assets extends Context.Tag('Assets')<
     readonly setGroups: (
       orgId: string,
       assetId: string,
-      groupIds: Array<string>,
+      groupIds: ReadonlyArray<string>,
     ) => Effect.Effect<void, NotFoundError>
     /** Group tags for every asset of a song, in one query — for list/detail views. */
     readonly listGroupsForSong: (
       songId: string,
     ) => Effect.Effect<Array<{ assetId: string; group: typeof group.$inferSelect }>>
+    /**
+     * Deletes every asset of a song, objects first. Run before deleting the song:
+     * the DB cascade would drop the rows but leave the files in storage.
+     */
+    readonly removeAllForSong: (orgId: string, songId: string) => Effect.Effect<void, NotFoundError>
     /** Storage keys for every asset in the org — for cleaning up S3 objects before deleting the org. */
     readonly listStorageKeysForOrg: (orgId: string) => Effect.Effect<Array<string>>
   }
 >() {}
+
+// Keeps object keys predictable: no path segments, control or exotic characters.
+export function safeFilename(filename: string) {
+  const cleaned = filename
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^[._]+/, '')
+    .slice(-120)
+  return cleaned || 'file'
+}
 
 export const AssetsLive = Layer.effect(
   Assets,
@@ -64,7 +80,7 @@ export const AssetsLive = Layer.effect(
         ),
       )
 
-    const setGroups = (orgId: string, assetId: string, groupIds: Array<string>) =>
+    const setGroups = (orgId: string, assetId: string, groupIds: ReadonlyArray<string>) =>
       getOwnedAsset(orgId, assetId).pipe(
         Effect.flatMap(() => requireOrgGroups(db, orgId, groupIds)),
         Effect.flatMap((ids) =>
@@ -93,7 +109,7 @@ export const AssetsLive = Layer.effect(
           Effect.flatMap(() => requireOrgGroups(db, orgId, input.groupIds)),
           Effect.flatMap((groupIds) => {
             const assetId = crypto.randomUUID()
-            const storageKey = `org/${orgId}/song/${input.songId}/${assetId}-${input.filename}`
+            const storageKey = `org/${orgId}/song/${input.songId}/${assetId}-${safeFilename(input.filename)}`
             return storage.presignPut(storageKey, input.contentType).pipe(
               Effect.flatMap((uploadUrl) =>
                 Effect.promise(() =>
@@ -175,6 +191,31 @@ export const AssetsLive = Layer.effect(
             .innerJoin(asset, eq(asset.id, assetGroup.assetId))
             .innerJoin(group, eq(group.id, assetGroup.groupId))
             .where(eq(asset.songId, songId)),
+        ),
+      removeAllForSong: (orgId, songId) =>
+        Effect.promise(() =>
+          db
+            .select({ id: asset.id, storageKey: asset.storageKey, songOrgId: song.organizationId })
+            .from(song)
+            .leftJoin(asset, eq(asset.songId, song.id))
+            .where(and(eq(song.id, songId), eq(song.organizationId, orgId))),
+        ).pipe(
+          Effect.flatMap((rows) =>
+            rows.length === 0
+              ? Effect.fail(new NotFoundError({ entity: 'song', id: songId }))
+              : Effect.succeed(rows.flatMap((r) => (r.id && r.storageKey ? [r.storageKey] : []))),
+          ),
+          Effect.flatMap((keys) =>
+            Effect.all(
+              // A missing object must not block the deletion of the song.
+              keys.map((key) => storage.remove(key).pipe(Effect.catchAll(() => Effect.void))),
+              { concurrency: 5 },
+            ),
+          ),
+          Effect.flatMap(() =>
+            Effect.promise(() => db.delete(asset).where(eq(asset.songId, songId))),
+          ),
+          Effect.asVoid,
         ),
       listStorageKeysForOrg: (orgId) =>
         Effect.promise(async () => {

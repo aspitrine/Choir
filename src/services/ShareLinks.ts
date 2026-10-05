@@ -26,14 +26,18 @@ export class ShareLinks extends Context.Tag('ShareLinks')<
     readonly create: (
       orgId: string,
       playlistId: string,
-      groupIds: Array<string>,
+      groupIds: ReadonlyArray<string>,
     ) => Effect.Effect<typeof shareLink.$inferSelect, NotFoundError>
     readonly revoke: (orgId: string, shareLinkId: string) => Effect.Effect<void, NotFoundError>
+    /**
+     * Everything an anonymous visitor may see through a share link — and nothing
+     * more: no private song notes, organization ids or import provenance.
+     */
     readonly resolvePublic: (token: string) => Effect.Effect<
       {
-        playlist: typeof playlist.$inferSelect
+        playlist: Pick<typeof playlist.$inferSelect, 'name' | 'description'>
         items: Array<{
-          song: typeof song.$inferSelect
+          song: Pick<typeof song.$inferSelect, 'id' | 'title' | 'composer' | 'arranger' | 'key' | 'tempo'>
           assets: Array<
             typeof asset.$inferSelect & { groups: Array<Pick<typeof group.$inferSelect, 'id' | 'name'>> }
           >
@@ -137,7 +141,18 @@ export const ShareLinksLive = Layer.effect(
               ).map((r) => r.groupId)
 
               const items = await db
-                .select({ itemId: playlistItem.id, position: playlistItem.position, song })
+                .select({
+                  itemId: playlistItem.id,
+                  position: playlistItem.position,
+                  song: {
+                    id: song.id,
+                    title: song.title,
+                    composer: song.composer,
+                    arranger: song.arranger,
+                    key: song.key,
+                    tempo: song.tempo,
+                  },
+                })
                 .from(playlistItem)
                 .innerJoin(song, eq(song.id, playlistItem.songId))
                 .where(eq(playlistItem.playlistId, link.playlistId))
@@ -146,7 +161,11 @@ export const ShareLinksLive = Layer.effect(
               const songIds = items.map((i) => i.song.id)
               const allAssets =
                 songIds.length > 0
-                  ? await db.select().from(asset).where(inArray(asset.songId, songIds))
+                  ? await db
+                      .select()
+                      .from(asset)
+                      // Uploads still in flight (or failed) have no object to serve.
+                      .where(and(inArray(asset.songId, songIds), eq(asset.status, 'ready')))
                   : []
 
               let visibleAssetIds: Set<string>
@@ -189,7 +208,7 @@ export const ShareLinksLive = Layer.effect(
                   : []
 
               return {
-                playlist: playlistRow!,
+                playlist: { name: playlistRow!.name, description: playlistRow!.description },
                 items: items.map((i) => ({
                   song: i.song,
                   assets: allAssets

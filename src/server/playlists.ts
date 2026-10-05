@@ -5,6 +5,7 @@ import { AuthService } from '../services/Auth'
 import { Playlists } from '../services/Playlists'
 import { Access } from '../services/Access'
 import { AppRuntime } from '../services/Runtime'
+import { AddEventDateInput, ByPlaylist, CreatePlaylistInput, PlaylistItemInput, PlaylistSongInput, RemoveEventDateInput, ReorderPlaylistInput, decodeInput } from '../domain/inputs'
 
 function headers() {
   return getRequestHeaders() as unknown as Headers
@@ -22,7 +23,7 @@ export const listPlaylistsFn = createServerFn({ method: 'GET' }).handler(() =>
 )
 
 export const getPlaylistFn = createServerFn({ method: 'GET' })
-  .validator((data: { playlistId: string }) => data)
+  .validator(decodeInput(ByPlaylist))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -38,7 +39,7 @@ export const getPlaylistFn = createServerFn({ method: 'GET' })
   )
 
 export const createPlaylistFn = createServerFn({ method: 'POST' })
-  .validator((data: { name: string; description: string | null }) => data)
+  .validator(decodeInput(CreatePlaylistInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -53,7 +54,7 @@ export const createPlaylistFn = createServerFn({ method: 'POST' })
   )
 
 export const deletePlaylistFn = createServerFn({ method: 'POST' })
-  .validator((data: { playlistId: string }) => data)
+  .validator(decodeInput(ByPlaylist))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -68,7 +69,7 @@ export const deletePlaylistFn = createServerFn({ method: 'POST' })
   )
 
 export const addSongToPlaylistFn = createServerFn({ method: 'POST' })
-  .validator((data: { playlistId: string; songId: string }) => data)
+  .validator(decodeInput(PlaylistSongInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -83,7 +84,7 @@ export const addSongToPlaylistFn = createServerFn({ method: 'POST' })
   )
 
 export const removePlaylistItemFn = createServerFn({ method: 'POST' })
-  .validator((data: { playlistId: string; itemId: string }) => data)
+  .validator(decodeInput(PlaylistItemInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -98,7 +99,7 @@ export const removePlaylistItemFn = createServerFn({ method: 'POST' })
   )
 
 export const reorderPlaylistFn = createServerFn({ method: 'POST' })
-  .validator((data: { playlistId: string; itemIdsInOrder: Array<string> }) => data)
+  .validator(decodeInput(ReorderPlaylistInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -113,7 +114,7 @@ export const reorderPlaylistFn = createServerFn({ method: 'POST' })
   )
 
 export const addEventDateFn = createServerFn({ method: 'POST' })
-  .validator((data: { playlistId: string; eventDate: string }) => data)
+  .validator(decodeInput(AddEventDateInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -122,13 +123,13 @@ export const addEventDateFn = createServerFn({ method: 'POST' })
         const access = yield* Access
         const { orgId, userId } = yield* auth.requireActiveOrganizationId(headers())
         yield* access.requireManager(orgId, userId)
-        yield* playlists.addEventDate(orgId, data.playlistId, new Date(data.eventDate))
+        yield* playlists.addEventDate(orgId, data.playlistId, data.eventDate)
       }),
     ),
   )
 
 export const removeEventDateFn = createServerFn({ method: 'POST' })
-  .validator((data: { playlistId: string; eventDateId: string }) => data)
+  .validator(decodeInput(RemoveEventDateInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {

@@ -5,6 +5,7 @@ import { AuthService } from '../services/Auth'
 import { Groups } from '../services/Groups'
 import { Access } from '../services/Access'
 import { AppRuntime } from '../services/Runtime'
+import { ByGroup, CreateGroupInput, decodeInput } from '../domain/inputs'
 import { PageParams } from '../domain/pagination'
 
 function headers() {
@@ -36,7 +37,7 @@ export const searchGroupsFn = createServerFn({ method: 'GET' })
   )
 
 export const createGroupFn = createServerFn({ method: 'POST' })
-  .validator((data: { name: string }) => data)
+  .validator(decodeInput(CreateGroupInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -51,7 +52,7 @@ export const createGroupFn = createServerFn({ method: 'POST' })
   )
 
 export const deleteGroupFn = createServerFn({ method: 'POST' })
-  .validator((data: { groupId: string }) => data)
+  .validator(decodeInput(ByGroup))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {

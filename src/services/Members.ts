@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from 'effect'
 import { eq, and, or, ilike, count, inArray } from 'drizzle-orm'
 import { Database } from './Database'
 import { member, user, invitation, invitationGroup, memberGroup, group } from '../db/schema'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { auth } from '../lib/auth'
 import { ForbiddenError, NotFoundError, ValidationError } from '../domain/errors'
 import { PAGE_SIZE, type Page } from '../domain/pagination'
@@ -33,9 +34,19 @@ export class Members extends Context.Tag('Members')<
         firstName: string | null
         lastName: string | null
         role: InviteRole
-        groupIds: Array<string>
+        groupIds: ReadonlyArray<string>
       },
-    ) => Effect.Effect<{ id: string }, ValidationError | NotFoundError>
+    ) => Effect.Effect<{ id: string; secret: string }, ValidationError | NotFoundError>
+    /**
+     * Accepts an invitation for the signed-in user, only with the secret from the
+     * invite link, then copies its group grants onto the new member.
+     */
+    readonly acceptInvite: (
+      headers: Headers,
+      userId: string,
+      invitationId: string,
+      secret: string,
+    ) => Effect.Effect<void, ForbiddenError | ValidationError>
     readonly revokeInvite: (headers: Headers, invitationId: string) => Effect.Effect<void, ValidationError>
     readonly updateMemberRole: (
       headers: Headers,
@@ -47,7 +58,7 @@ export class Members extends Context.Tag('Members')<
     readonly updateMemberGroups: (
       orgId: string,
       memberId: string,
-      groupIds: Array<string>,
+      groupIds: ReadonlyArray<string>,
     ) => Effect.Effect<void, NotFoundError>
     readonly removeMember: (
       headers: Headers,
@@ -72,10 +83,54 @@ export class Members extends Context.Tag('Members')<
   }
 >() {}
 
+function secretsMatch(expected: string, given: string) {
+  const a = Buffer.from(expected)
+  const b = Buffer.from(given)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
 export const MembersLive = Layer.effect(
   Members,
   Effect.gen(function* () {
     const db = yield* Database
+
+  const finalizeAcceptance = (userId: string, memberId: string, invitationId: string) =>
+      Effect.promise(() =>
+        db
+          .select({ id: member.id })
+          .from(member)
+          .innerJoin(invitation, eq(invitation.organizationId, member.organizationId))
+          .where(
+            and(
+              eq(member.id, memberId),
+              eq(member.userId, userId),
+              eq(invitation.id, invitationId),
+              eq(invitation.status, 'accepted'),
+            ),
+          )
+          .limit(1),
+      ).pipe(
+        Effect.flatMap(([row]) =>
+          row ? Effect.void : Effect.fail(new ForbiddenError({ reason: 'invitation-not-accepted-by-caller' })),
+        ),
+        Effect.flatMap(() =>
+          Effect.promise(async () => {
+            const groupIds = (
+              await db
+                .select({ groupId: invitationGroup.groupId })
+                .from(invitationGroup)
+                .where(eq(invitationGroup.invitationId, invitationId))
+            ).map((r) => r.groupId)
+            if (groupIds.length > 0) {
+              await db
+                .insert(memberGroup)
+                .values(groupIds.map((groupId) => ({ memberId, groupId })))
+                .onConflictDoNothing()
+            }
+          }),
+        ),
+        Effect.asVoid,
+      )
 
     return {
       search: (orgId, { q, page }) => {
@@ -166,7 +221,9 @@ export const MembersLive = Layer.effect(
         requireOrgGroups(db, orgId, input.groupIds).pipe(
           Effect.flatMap((groupIds) =>
             Effect.tryPromise({
-          try: () =>
+          try: async () =>
+            ({
+              ...(await
             auth.api.createInvitation({
               headers,
               body: {
@@ -176,9 +233,16 @@ export const MembersLive = Layer.effect(
                 firstName: input.firstName ?? undefined,
                 lastName: input.lastName ?? undefined,
               },
+            })),
+              secret: randomBytes(32).toString('base64url'),
             }),
           catch: (cause) => new ValidationError({ message: (cause as Error).message ?? 'Invitation impossible' }),
             }).pipe(
+              Effect.tap((created) =>
+                Effect.promise(() =>
+                  db.update(invitation).set({ secret: created.secret }).where(eq(invitation.id, created.id)),
+                ),
+              ),
               Effect.tap((created) =>
                 groupIds.length > 0
                   ? Effect.promise(() =>
@@ -190,7 +254,31 @@ export const MembersLive = Layer.effect(
               ),
             ),
           ),
-          Effect.map((created) => ({ id: created.id })),
+          Effect.map((created) => ({ id: created.id, secret: created.secret })),
+        ),
+
+      acceptInvite: (headers, userId, invitationId, secret) =>
+        Effect.promise(() =>
+          db.select({ secret: invitation.secret }).from(invitation).where(eq(invitation.id, invitationId)).limit(1),
+        ).pipe(
+          Effect.flatMap(([row]) =>
+            row?.secret && secretsMatch(row.secret, secret)
+              ? Effect.void
+              : Effect.fail(new ForbiddenError({ reason: 'invalid-invitation-link' })),
+          ),
+          Effect.flatMap(() =>
+            Effect.tryPromise({
+              try: () => auth.api.acceptInvitation({ headers, body: { invitationId } }),
+              catch: (cause) =>
+                new ValidationError({ message: (cause as Error).message ?? "Impossible d'accepter l'invitation" }),
+            }),
+          ),
+          Effect.flatMap(
+            (accepted): Effect.Effect<void, ForbiddenError | ValidationError> =>
+              accepted?.member
+                ? finalizeAcceptance(userId, accepted.member.id, invitationId)
+                : Effect.fail(new ValidationError({ message: "Impossible d'accepter l'invitation" })),
+          ),
         ),
 
       revokeInvite: (headers, invitationId) =>
@@ -248,43 +336,7 @@ export const MembersLive = Layer.effect(
           catch: (cause) => new ValidationError({ message: (cause as Error).message ?? 'Suppression impossible' }),
         }).pipe(Effect.asVoid),
 
-      finalizeAcceptance: (userId, memberId, invitationId) =>
-        Effect.promise(() =>
-          db
-            .select({ id: member.id })
-            .from(member)
-            .innerJoin(invitation, eq(invitation.organizationId, member.organizationId))
-            .where(
-              and(
-                eq(member.id, memberId),
-                eq(member.userId, userId),
-                eq(invitation.id, invitationId),
-                eq(invitation.status, 'accepted'),
-              ),
-            )
-            .limit(1),
-        ).pipe(
-          Effect.flatMap(([row]) =>
-            row ? Effect.void : Effect.fail(new ForbiddenError({ reason: 'invitation-not-accepted-by-caller' })),
-          ),
-          Effect.flatMap(() =>
-            Effect.promise(async () => {
-              const groupIds = (
-                await db
-                  .select({ groupId: invitationGroup.groupId })
-                  .from(invitationGroup)
-                  .where(eq(invitationGroup.invitationId, invitationId))
-              ).map((r) => r.groupId)
-              if (groupIds.length > 0) {
-                await db
-                  .insert(memberGroup)
-                  .values(groupIds.map((groupId) => ({ memberId, groupId })))
-                  .onConflictDoNothing()
-              }
-            }),
-          ),
-          Effect.asVoid,
-        ),
+      finalizeAcceptance,
 
       deleteOrganization: (headers, orgId) =>
         Effect.tryPromise({

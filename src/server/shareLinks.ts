@@ -6,13 +6,14 @@ import { ShareLinks } from '../services/ShareLinks'
 import { Access } from '../services/Access'
 import { Storage } from '../services/Storage'
 import { AppRuntime } from '../services/Runtime'
+import { ByPlaylist, ByShareLink, CreateShareLinkInput, PublicAssetUrls, PublicToken, decodeInput } from '../domain/inputs'
 
 function headers() {
   return getRequestHeaders() as unknown as Headers
 }
 
 export const listShareLinksFn = createServerFn({ method: 'GET' })
-  .validator((data: { playlistId: string }) => data)
+  .validator(decodeInput(ByPlaylist))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -25,7 +26,7 @@ export const listShareLinksFn = createServerFn({ method: 'GET' })
   )
 
 export const createShareLinkFn = createServerFn({ method: 'POST' })
-  .validator((data: { playlistId: string; groupIds: Array<string> }) => data)
+  .validator(decodeInput(CreateShareLinkInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -40,7 +41,7 @@ export const createShareLinkFn = createServerFn({ method: 'POST' })
   )
 
 export const revokeShareLinkFn = createServerFn({ method: 'POST' })
-  .validator((data: { shareLinkId: string }) => data)
+  .validator(decodeInput(ByShareLink))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -56,7 +57,7 @@ export const revokeShareLinkFn = createServerFn({ method: 'POST' })
 
 // Public: no auth. The token itself is the capability.
 export const getPublicPlaylistFn = createServerFn({ method: 'GET' })
-  .validator((data: { token: string }) => data)
+  .validator(decodeInput(PublicToken))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -93,7 +94,7 @@ export const getPublicPlaylistFn = createServerFn({ method: 'GET' })
 // Public: fresh presigned URLs for assets visible through this token. Presigned
 // URLs expire, and a looping playlist or a late PDF merge can outlive them.
 export const getPublicAssetUrlsFn = createServerFn({ method: 'POST' })
-  .validator((data: { token: string; assetIds: Array<string> }) => data)
+  .validator(decodeInput(PublicAssetUrls))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {

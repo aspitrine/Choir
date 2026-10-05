@@ -5,6 +5,7 @@ import { AuthService } from '../services/Auth'
 import { Assets } from '../services/Assets'
 import { Access } from '../services/Access'
 import { AppRuntime } from '../services/Runtime'
+import { ByAsset, SetAssetGroupsInput, decodeInput } from '../domain/inputs'
 import { CreateUploadIntentInput } from '../domain/songs'
 
 function headers() {
@@ -27,7 +28,7 @@ export const createUploadIntentFn = createServerFn({ method: 'POST' })
   )
 
 export const confirmUploadFn = createServerFn({ method: 'POST' })
-  .validator((data: { assetId: string }) => data)
+  .validator(decodeInput(ByAsset))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -42,7 +43,7 @@ export const confirmUploadFn = createServerFn({ method: 'POST' })
   )
 
 export const setAssetGroupsFn = createServerFn({ method: 'POST' })
-  .validator((data: { assetId: string; groupIds: Array<string> }) => data)
+  .validator(decodeInput(SetAssetGroupsInput))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {
@@ -57,7 +58,7 @@ export const setAssetGroupsFn = createServerFn({ method: 'POST' })
   )
 
 export const deleteAssetFn = createServerFn({ method: 'POST' })
-  .validator((data: { assetId: string }) => data)
+  .validator(decodeInput(ByAsset))
   .handler(({ data }) =>
     AppRuntime.runPromise(
       Effect.gen(function* () {

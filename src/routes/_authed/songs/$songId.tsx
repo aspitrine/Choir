@@ -22,6 +22,7 @@ import { getMyRoleFn } from '@/server/members'
 import { PdfViewer } from '@/components/pdf-viewer'
 import { AudioPlayer } from '@/components/audio-player'
 import { useConfirm } from '@/components/confirm-dialog'
+import { PLAYABLE_AUDIO_MIME_TYPES, SCORE_MIME_TYPES, guessAssetKind } from '@/domain/songs'
 
 export const Route = createFileRoute('/_authed/songs/$songId')({
   loader: async ({ params }) => {
@@ -279,30 +280,13 @@ function AssetRow({
   )
 }
 
-function guessAssetKind(mimeType: string): 'score' | 'audio' {
-  return mimeType.startsWith('audio/') ? 'audio' : 'score'
-}
-
 function filenameWithoutExtension(filename: string) {
   return filename.replace(/\.[^./]+$/, '')
 }
 
-// Formats browsers can actually decode for playback (excludes AIFF, WMA, etc).
-const PLAYABLE_AUDIO_MIME_TYPES = new Set([
-  'audio/mpeg',
-  'audio/mp3',
-  'audio/mp4',
-  'audio/x-m4a',
-  'audio/aac',
-  'audio/wav',
-  'audio/x-wav',
-  'audio/wave',
-  'audio/ogg',
-  'audio/webm',
-  'audio/flac',
-])
+const PLAYABLE_AUDIO = new Set<string>(PLAYABLE_AUDIO_MIME_TYPES)
 
-const FILE_ACCEPT = [...PLAYABLE_AUDIO_MIME_TYPES, 'application/pdf'].join(',')
+const FILE_ACCEPT = [...PLAYABLE_AUDIO_MIME_TYPES, ...SCORE_MIME_TYPES].join(',')
 
 function UploadForm({
   songId,
@@ -370,7 +354,13 @@ function UploadForm({
           accept={FILE_ACCEPT}
           onChange={(e) => {
             const picked = e.target.files?.[0] ?? null
-            if (picked && guessAssetKind(picked.type) === 'audio' && !PLAYABLE_AUDIO_MIME_TYPES.has(picked.type)) {
+            if (picked && guessAssetKind(picked.type) === 'score' && picked.type !== 'application/pdf') {
+              setError('Seuls les PDF et les fichiers audio sont acceptés')
+              setFile(null)
+              e.target.value = ''
+              return
+            }
+            if (picked && guessAssetKind(picked.type) === 'audio' && !PLAYABLE_AUDIO.has(picked.type)) {
               setError("Ce format audio ne peut pas être écouté dans un navigateur (essayez MP3, WAV, OGG…)")
               setFile(null)
               e.target.value = ''

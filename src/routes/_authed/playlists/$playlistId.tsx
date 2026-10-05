@@ -1,5 +1,6 @@
 import { createFileRoute, Link, redirect, useRouter } from '@tanstack/react-router'
 import { useEffect, useId, useState } from 'react'
+import { toast } from 'sonner'
 import {
   DndContext,
   closestCenter,
@@ -184,7 +185,11 @@ function SongList({
     const newIndex = order.indexOf(String(over.id))
     const next = arrayMove(order, oldIndex, newIndex)
     setOrder(next)
-    await reorderPlaylistFn({ data: { playlistId, itemIdsInOrder: next } })
+    try {
+      await reorderPlaylistFn({ data: { playlistId, itemIdsInOrder: next } })
+    } catch {
+      toast.error("L'ordre n'a pas pu être enregistré, la playlist a été rechargée")
+    }
     onChanged()
   }
 

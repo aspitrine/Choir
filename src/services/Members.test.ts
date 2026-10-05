@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import { Effect, Layer } from 'effect'
-import { invitation, invitationGroup, memberGroup } from '../db/schema'
+import { eq } from 'drizzle-orm'
+import { invitation, invitationGroup, member, memberGroup } from '../db/schema'
 import { ForbiddenError, NotFoundError, ValidationError } from '../domain/errors'
 import { createTestDb, failWith, runWith } from '../test/db'
 import { seedGroup, seedMember, seedOrg, seedUser } from '../test/fixtures'
@@ -9,6 +10,7 @@ import { Members, MembersLive } from './Members'
 // Better Auth endpoints are its own concern; here they are stand-ins whose calls we inspect.
 const authApi = vi.hoisted(() => ({
   createInvitation: vi.fn(),
+  acceptInvitation: vi.fn(),
   cancelInvitation: vi.fn(),
   updateMemberRole: vi.fn(),
   removeMember: vi.fn(),
@@ -226,6 +228,84 @@ describe('Members', () => {
     expect(authApi.updateMemberRole).toHaveBeenCalledWith({
       headers,
       body: { organizationId: org.id, memberId: other.id, role: 'admin' },
+    })
+  })
+
+  describe('invitation secret', () => {
+    async function invite() {
+      const org = await seedOrg(t.db)
+      const owner = await seedUser(t.db)
+      const basse = await seedGroup(t.db, org.id, 'Basse')
+      authApi.createInvitation.mockImplementation(async ({ body }: { body: { email: string } }) =>
+        seedInvitation(org.id, owner.id, body.email),
+      )
+      const created = await run(
+        Effect.flatMap(Members, (s) =>
+          s.createInvite(headers, org.id, {
+            email: 'singer@test.local',
+            firstName: null,
+            lastName: null,
+            role: 'admin',
+            groupIds: [basse.id],
+          }),
+        ),
+      )
+      const singer = await seedUser(t.db, { email: 'singer@test.local' })
+      // Stand-in for Better Auth accepting: creates the member, marks it accepted.
+      authApi.acceptInvitation.mockImplementation(async () => {
+        await t.db.update(invitation).set({ status: 'accepted' }).where(eq(invitation.id, created.id))
+        return { member: await seedMember(t.db, org.id, singer.id, 'admin') }
+      })
+      return { org, created, singer, basse }
+    }
+
+    it('generates a long random secret per invitation and stores it', async () => {
+      const { created } = await invite()
+      expect(created.secret).toMatch(/^[A-Za-z0-9_-]{43}$/)
+      const [row] = await t.db.select().from(invitation).where(eq(invitation.id, created.id))
+      expect(row!.secret).toBe(created.secret)
+    })
+
+    it('accepts with the right secret and grants the invitation groups', async () => {
+      const { created, singer, basse } = await invite()
+      await run(Effect.flatMap(Members, (s) => s.acceptInvite(headers, singer.id, created.id, created.secret)))
+
+      expect(authApi.acceptInvitation).toHaveBeenCalledWith({ headers, body: { invitationId: created.id } })
+      expect((await t.db.select().from(memberGroup)).map((r) => r.groupId)).toEqual([basse.id])
+    })
+
+    it.each([
+      ['a wrong secret', 'x'.repeat(43)],
+      ['an empty secret', ''],
+      ['a prefix of the secret', null],
+    ])('refuses %s without reaching Better Auth', async (_label, attempt) => {
+      const { created, singer } = await invite()
+      const secret = attempt ?? created.secret.slice(0, 10)
+      const err = await fail(Effect.flatMap(Members, (s) => s.acceptInvite(headers, singer.id, created.id, secret)))
+      expect(err).toBeInstanceOf(ForbiddenError)
+      expect(authApi.acceptInvitation).not.toHaveBeenCalled()
+      expect(await t.db.select().from(member).where(eq(member.userId, singer.id))).toEqual([])
+    })
+
+    it('refuses invitations created before secrets existed', async () => {
+      const { created, singer } = await invite()
+      await t.db.update(invitation).set({ secret: null }).where(eq(invitation.id, created.id))
+      const err = await fail(Effect.flatMap(Members, (s) => s.acceptInvite(headers, singer.id, created.id, '')))
+      expect(err).toBeInstanceOf(ForbiddenError)
+    })
+
+    it('refuses an unknown invitation', async () => {
+      const singer = await seedUser(t.db)
+      const err = await fail(Effect.flatMap(Members, (s) => s.acceptInvite(headers, singer.id, 'nope', 'secret')))
+      expect(err).toBeInstanceOf(ForbiddenError)
+    })
+
+    it('reports Better Auth refusals (wrong recipient, expired…) as validation errors', async () => {
+      const { created, singer } = await invite()
+      authApi.acceptInvitation.mockRejectedValue(new Error('You are not the recipient of the invitation'))
+      const err = await fail(Effect.flatMap(Members, (s) => s.acceptInvite(headers, singer.id, created.id, created.secret)))
+      expect(err).toBeInstanceOf(ValidationError)
+      expect(await t.db.select().from(memberGroup)).toEqual([])
     })
   })
 })

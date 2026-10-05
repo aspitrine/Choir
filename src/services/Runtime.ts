@@ -12,7 +12,7 @@ import { MembersLive } from './Members'
 
 const AppLayer = Layer.mergeAll(
   DatabaseLive,
-  AuthServiceLive,
+  AuthServiceLive.pipe(Layer.provide(DatabaseLive)),
   StorageLive,
   SongsLive.pipe(Layer.provide(DatabaseLive)),
   AssetsLive.pipe(Layer.provide(Layer.mergeAll(DatabaseLive, StorageLive))),
