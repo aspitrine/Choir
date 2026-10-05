@@ -52,20 +52,31 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
     if (wantPlay.current) audioRef.current?.play().catch(() => {})
   }, [src])
 
-  useEffect(() => {
+  const indexRef = useRef(index)
+  indexRef.current = index
+
+  // Lock-screen / headset controls drive whichever player is playing — not the
+  // last one mounted — so claim them on every play (incl. each new track).
+  const claimMediaSession = () => {
     if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return
-    navigator.mediaSession.metadata = new MediaMetadata({ title: fileTitle(current) })
-    if (tracks.length > 1) {
-      navigator.mediaSession.setActionHandler('nexttrack', () => {
-        wantPlay.current = true
-        goTo(index + 1)
-      })
-      navigator.mediaSession.setActionHandler('previoustrack', () => {
-        wantPlay.current = true
-        goTo(index - 1)
-      })
+    const track = tracks[indexRef.current % tracks.length]!
+    navigator.mediaSession.metadata = new MediaMetadata({ title: fileTitle(track) })
+    const step = (delta: number) => () => {
+      wantPlay.current = true
+      goTo(indexRef.current + delta)
     }
-  }, [index, current, tracks.length])
+    navigator.mediaSession.setActionHandler('nexttrack', tracks.length > 1 ? step(1) : null)
+    navigator.mediaSession.setActionHandler('previoustrack', tracks.length > 1 ? step(-1) : null)
+  }
+
+  const onPlay = () => {
+    wantPlay.current = true
+    // One voice at a time: starting a playlist pauses the others on the page.
+    document.querySelectorAll<HTMLAudioElement>('audio[data-loop-player]').forEach((other) => {
+      if (other !== audioRef.current && !other.paused) other.pause()
+    })
+    claimMediaSession()
+  }
 
   const onError = async () => {
     // Presigned URLs expire: fetch fresh ones once per track before giving up.
@@ -96,7 +107,8 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
         preload="none"
         loop={tracks.length === 1}
         className="w-full"
-        onPlay={() => (wantPlay.current = true)}
+        data-loop-player=""
+        onPlay={onPlay}
         onPause={() => (wantPlay.current = false)}
         onEnded={() => {
           wantPlay.current = true

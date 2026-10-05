@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react'
 import { PDFDocument } from 'pdf-lib'
 import type { SharedAsset, SharedItem } from '@/domain/share-bundles'
 import { SharedBundles } from './shared-bundles'
@@ -143,4 +143,52 @@ describe('SharedBundles', () => {
       'Partitions - Tout le monde.pdf',
     )
   })
+
+  it('pauses the other playlists when one starts', () => {
+    render(
+      <SharedBundles
+        token="t"
+        items={[item('Ave', [asset('a1'), asset('a2', { groups: [basse] })])]}
+      />,
+    )
+    const [everyone, bass] = Array.from(document.querySelectorAll('audio'))
+    Object.defineProperty(everyone!, 'paused', { value: false, configurable: true })
+    Object.defineProperty(bass!, 'paused', { value: false, configurable: true })
+
+    fireEvent.play(bass!)
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause)
+    expect(pause.mock.contexts).toEqual([everyone])
+  })
+
+  it('gives lock-screen controls to the playlist being played', () => {
+    const handlers = new Map<string, (() => void) | null>()
+    const mediaSession = {
+      metadata: null as unknown,
+      setActionHandler: (action: string, fn: (() => void) | null) => handlers.set(action, fn),
+    }
+    Object.defineProperty(navigator, 'mediaSession', { value: mediaSession, configurable: true })
+    vi.stubGlobal('MediaMetadata', class { constructor(public init: { title: string }) {} })
+
+    render(
+      <SharedBundles
+        token="t"
+        items={[
+          item('Un', [asset('a1'), asset('b1', { groups: [basse] })]),
+          item('Deux', [asset('a2'), asset('b2', { groups: [basse] })]),
+        ]}
+      />,
+    )
+    const [everyone, bass] = Array.from(document.querySelectorAll('audio'))
+    fireEvent.play(everyone!)
+    expect((mediaSession.metadata as { init: { title: string } }).init.title).toBe('Un')
+
+    act(() => handlers.get('nexttrack')!())
+    expect(everyone!.getAttribute('src')).toBe('https://s3.test/a2')
+    expect(bass!.getAttribute('src')).toBe('https://s3.test/b1')
+
+    // @ts-expect-error cleanup of the test-only property
+    delete navigator.mediaSession
+    vi.unstubAllGlobals()
+  })
 })
+
