@@ -21,7 +21,7 @@ export const group = pgTable(
       .references(() => organization.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('group_org_slug_unique').on(t.organizationId, t.slug)],
 )
@@ -41,8 +41,8 @@ export const song = pgTable('song', {
   // No sync after import: editing the copy never touches the source.
   importedFromSongId: text('imported_from_song_id'),
   importedFromOrgId: text('imported_from_org_id'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const asset = pgTable('asset', {
@@ -59,7 +59,7 @@ export const asset = pgTable('asset', {
   sizeBytes: integer('size_bytes').notNull().default(0),
   durationMs: integer('duration_ms'),
   status: assetStatus('status').notNull().default('uploading'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 // Tags an asset with a group. A share link filtered on groups only shows
@@ -113,7 +113,7 @@ export const playlist = pgTable('playlist', {
     .references(() => organization.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   description: text('description'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const playlistItem = pgTable(
@@ -138,8 +138,8 @@ export const playlistEventDate = pgTable('playlist_event_date', {
   playlistId: text('playlist_id')
     .notNull()
     .references(() => playlist.id, { onDelete: 'cascade' }),
-  eventDate: timestamp('event_date').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  eventDate: timestamp('event_date', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const shareLink = pgTable('share_link', {
@@ -148,9 +148,9 @@ export const shareLink = pgTable('share_link', {
     .notNull()
     .references(() => playlist.id, { onDelete: 'cascade' }),
   token: text('token').notNull().unique(),
-  expiresAt: timestamp('expires_at'),
-  revokedAt: timestamp('revoked_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 // Multiple groups can filter one share link; no rows = everything visible.
