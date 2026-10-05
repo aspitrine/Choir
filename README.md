@@ -9,6 +9,17 @@ pnpm install
 pnpm dev
 ```
 
+# Testing
+
+```bash
+pnpm test        # unit tests (Vitest) — services run against in-process Postgres (PGlite) with the real migrations
+pnpm test:e2e    # end-to-end (Playwright) — needs `docker compose up -d`
+```
+
+E2E tests start the app on port 3100 against a dedicated `chorale_e2e` database, recreated and seeded with a
+director account on every run (see `e2e/global-setup.ts`). Your dev database is never touched.
+First run: `pnpm exec playwright install chromium`.
+
 # Building For Production
 
 To build this application for production:
