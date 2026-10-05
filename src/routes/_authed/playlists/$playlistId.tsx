@@ -1,5 +1,5 @@
 import { createFileRoute, Link, redirect, useRouter } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -162,6 +162,9 @@ function SongList({
   onChanged: () => void
 }) {
   const confirm = useConfirm()
+  // dnd-kit otherwise numbers its aria ids with a module counter, which differs
+  // between the SSR render and hydration.
+  const dndId = useId()
   const [order, setOrder] = useState(items.map((i) => i.itemId))
   if (order.length !== items.length || order.some((id) => !items.some((i) => i.itemId === id))) {
     setOrder(items.map((i) => i.itemId))
@@ -220,7 +223,7 @@ function SongList({
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={order} strategy={verticalListSortingStrategy}>
             {order.map((itemId) => {
               const item = byId.get(itemId)
