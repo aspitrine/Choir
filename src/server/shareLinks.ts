@@ -74,6 +74,8 @@ export const getPublicPlaylistFn = createServerFn({ method: 'GET' })
                       kind: a.kind,
                       label: a.label,
                       mimeType: a.mimeType,
+                      status: a.status,
+                      groups: a.groups,
                       url,
                     })),
                   ),
@@ -84,6 +86,30 @@ export const getPublicPlaylistFn = createServerFn({ method: 'GET' })
           ),
         )
         return { playlist: resolved.playlist, items }
+      }),
+    ),
+  )
+
+// Public: fresh presigned URLs for assets visible through this token. Presigned
+// URLs expire, and a looping playlist or a late PDF merge can outlive them.
+export const getPublicAssetUrlsFn = createServerFn({ method: 'POST' })
+  .validator((data: { token: string; assetIds: Array<string> }) => data)
+  .handler(({ data }) =>
+    AppRuntime.runPromise(
+      Effect.gen(function* () {
+        const shareLinks = yield* ShareLinks
+        const storage = yield* Storage
+        const resolved = yield* shareLinks.resolvePublic(data.token)
+        const visible = new Map(
+          resolved.items.flatMap((item) => item.assets).map((a) => [a.id, a.storageKey] as const),
+        )
+        const entries = yield* Effect.all(
+          data.assetIds.flatMap((id) => {
+            const key = visible.get(id)
+            return key ? [storage.presignGet(key).pipe(Effect.map((url) => [id, url] as const))] : []
+          }),
+        )
+        return Object.fromEntries(entries) as Record<string, string>
       }),
     ),
   )

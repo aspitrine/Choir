@@ -33,7 +33,9 @@ export class ShareLinks extends Context.Tag('ShareLinks')<
         playlist: typeof playlist.$inferSelect
         items: Array<{
           song: typeof song.$inferSelect
-          assets: Array<typeof asset.$inferSelect>
+          assets: Array<
+            typeof asset.$inferSelect & { groups: Array<Pick<typeof group.$inferSelect, 'id' | 'name'>> }
+          >
         }>
       },
       NotFoundError
@@ -163,11 +165,28 @@ export const ShareLinksLive = Layer.effect(
                 )
               }
 
+              // Group tags of each visible asset, so the share page can bundle
+              // files by exactly whom they were shared with.
+              const tagRows =
+                visibleAssetIds.size > 0
+                  ? await db
+                      .select({ assetId: assetGroup.assetId, id: group.id, name: group.name })
+                      .from(assetGroup)
+                      .innerJoin(group, eq(group.id, assetGroup.groupId))
+                      .where(inArray(assetGroup.assetId, [...visibleAssetIds]))
+                      .orderBy(asc(group.name))
+                  : []
+
               return {
                 playlist: playlistRow!,
                 items: items.map((i) => ({
                   song: i.song,
-                  assets: allAssets.filter((a) => a.songId === i.song.id && visibleAssetIds.has(a.id)),
+                  assets: allAssets
+                    .filter((a) => a.songId === i.song.id && visibleAssetIds.has(a.id))
+                    .map((a) => ({
+                      ...a,
+                      groups: tagRows.filter((t) => t.assetId === a.id).map(({ id, name }) => ({ id, name })),
+                    })),
                 })),
               }
             })

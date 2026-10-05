@@ -30,6 +30,7 @@
     "drizzle-orm": "^0.45.2",
     "effect": "^3.22.1",
     "lucide-react": "^1.30.0",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "5.4.296",
     "pg": "^8.22.0",
     "radix-ui": "^1.6.7",

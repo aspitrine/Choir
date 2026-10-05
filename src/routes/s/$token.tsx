@@ -4,6 +4,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PdfViewer } from '@/components/pdf-viewer'
 import { AudioPlayer } from '@/components/audio-player'
+import { SharedBundles } from '@/components/shared-bundles'
 import { getPublicPlaylistFn } from '@/server/shareLinks'
 
 export const Route = createFileRoute('/s/$token')({
@@ -50,6 +51,7 @@ type PlaylistAsset = PlaylistItem['assets'][number]
 
 function PublicPlaylistPage() {
   const data = Route.useLoaderData()
+  const { token } = Route.useParams()
   const [selected, setSelected] = useState<PlaylistItem | null>(null)
 
   if (!data) {
@@ -93,6 +95,8 @@ function PublicPlaylistPage() {
           <p className="px-4 py-3 text-sm text-muted-foreground">Cette playlist est vide</p>
         ) : null}
       </div>
+
+      <SharedBundles token={token} items={data.items} />
 
       <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         <DialogContent className="sm:max-w-2xl">
