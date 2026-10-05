@@ -1,8 +1,8 @@
 import { createRouter as createTanStackRouter } from '@tanstack/react-router'
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query'
 import { routeTree } from './routeTree.gen'
-import { RouteError, RouteNotFound } from './components/route-fallbacks'
-import { createQueryClient } from './lib/query-client'
+import { RouteError, RouteNotFound } from '@/shared/ui/route-fallbacks'
+import { createQueryClient } from '@/shared/ui/lib/query-client'
 
 export function getRouter() {
   // Created per router: on the server that means per request (no cross-user cache).

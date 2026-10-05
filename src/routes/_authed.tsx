@@ -1,10 +1,6 @@
-import { createFileRoute, redirect, Outlet } from '@tanstack/react-router'
-import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
-import { TooltipProvider } from '@/components/ui/tooltip'
-import { AppSidebar } from '@/components/app-sidebar'
-import { OrgSwitcher } from '@/components/org-switcher'
-import { ConfirmProvider } from '@/components/confirm-dialog'
-import { sessionQueries, useRole } from '@/queries/session'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { sessionQueries } from '@/features/auth/ui/queries'
+import { AuthedLayout } from '@/app/shell/authed-layout'
 
 export const Route = createFileRoute('/_authed')({
   beforeLoad: async ({ location, context: { queryClient } }) => {
@@ -27,24 +23,3 @@ export const Route = createFileRoute('/_authed')({
   },
   component: AuthedLayout,
 })
-
-function AuthedLayout() {
-  const role = useRole()
-
-  return (
-    <TooltipProvider>
-      <ConfirmProvider>
-        <SidebarProvider>
-          <AppSidebar role={role} />
-          <SidebarInset>
-            <header className="flex h-12 items-center justify-between border-b px-4">
-              <SidebarTrigger />
-              <OrgSwitcher />
-            </header>
-            <Outlet />
-          </SidebarInset>
-        </SidebarProvider>
-      </ConfirmProvider>
-    </TooltipProvider>
-  )
-}

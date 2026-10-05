@@ -3,7 +3,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { sql } from 'drizzle-orm'
 import { Client, Pool } from 'pg'
 import { hashPassword } from 'better-auth/crypto'
-import * as schema from '../src/db/schema'
+import * as schema from '../src/features/auth/infrastructure/schema'
 import { E2E_DATABASE_URL, director } from './env'
 
 async function ensureDatabase() {
@@ -22,7 +22,7 @@ async function ensureDatabase() {
 export default async function globalSetup() {
   await ensureDatabase()
   const pool = new Pool({ connectionString: E2E_DATABASE_URL })
-  const db = drizzle(pool, { schema })
+  const db = drizzle(pool)
   await migrate(db, { migrationsFolder: new URL('../drizzle', import.meta.url).pathname })
 
   const { rows } = await pool.query<{ tablename: string }>(

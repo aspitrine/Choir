@@ -9,22 +9,43 @@ pnpm install
 pnpm dev
 ```
 
-# Data layer (TanStack Query)
+# Architecture
 
-- **Reads**: one `queryOptions` factory per resource in `src/queries/` (keys in `src/queries/keys.ts`).
-  Route loaders call `context.queryClient.ensureQueryData(...)`; components read the same options with
-  `useSuspenseQuery` (or `useQuery` + `keepPreviousData` for in-component search/paging).
-- **Writes**: `useMutation` calling the server function, with
-  `meta: { invalidates: [someKeys.all], errorMessage: '…' }` — the global `MutationCache`
-  (`src/lib/query-client.ts`) refetches those keys before `mutateAsync` resolves and toasts the message on failure.
-  Forms omit `errorMessage` and show `mutation.isError` inline instead.
-- The `QueryClient` is created per router (so per request during SSR) and wired with
-  `setupRouterSsrQueryIntegration`; switching choir clears the whole cache.
+Hexagonal (ports & adapters), sliced by feature — backend and frontend side by side:
+
+```
+src/
+  app/                    composition root (runtime.ts wires every port to its adapter) + app shell
+  features/<feature>/     auth · organizations · members · groups · songs · playlists · sharing
+    domain/               pure rules, entities, schemas — no I/O, no framework
+    application/          ports (Effect Context.Tag) + use cases (authorization lives here)
+    infrastructure/       adapters: Drizzle repositories + this feature's tables, Better Auth, …
+    server/               server functions: decode input → resolve actor → run a use case
+    ui/                   pages, components, query keys/options (TanStack Query)
+  shared/                 kernel used by every feature (errors, pagination, FileStorage port + S3
+                          adapter, db client, UI primitives, form, hooks)
+  routes/                 TanStack Router file routes — config only (search, loader, head), pages come from features
+```
+
+Dependencies point inwards: `ui → server → application → domain`, `infrastructure → application/domain`.
+A feature may use another feature's domain or application (e.g. playlists check songs through
+`SongRepository`), never its adapters. `src/architecture.test.ts` enforces these rules.
+
+**Reads** (UI): `queryOptions` per resource in `features/*/ui/queries.ts` (keys in `ui/keys.ts`). Route loaders
+call `context.queryClient.ensureQueryData(...)`; components read the same options with `useSuspenseQuery`
+(or `useQuery` + `keepPreviousData` for in-component search/paging).
+
+**Writes** (UI): `useMutation` calling the server function, with `meta: { invalidates: [someKeys.all], errorMessage: '…' }` —
+the global `MutationCache` (`shared/ui/lib/query-client.ts`) refetches those keys before `mutateAsync` resolves and
+toasts the message on failure. Forms omit `errorMessage` and show `mutation.isError` inline instead.
+
+The `QueryClient` is created per router (so per request during SSR) and wired with `setupRouterSsrQueryIntegration`;
+switching choir clears the whole cache.
 
 # Testing
 
 ```bash
-pnpm test        # unit tests (Vitest) — services run against in-process Postgres (PGlite) with the real migrations
+pnpm test        # unit tests (Vitest) — use cases run on the real Drizzle adapters over in-process Postgres (PGlite)
 pnpm test:e2e    # end-to-end (Playwright) — needs `docker compose up -d`
 ```
 

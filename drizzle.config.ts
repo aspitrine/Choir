@@ -1,7 +1,8 @@
 import { defineConfig } from 'drizzle-kit'
 
 export default defineConfig({
-  schema: './src/db/schema/index.ts',
+  // Each feature owns its tables (hexagonal: persistence is an infrastructure detail).
+  schema: './src/features/*/infrastructure/schema.ts',
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {

@@ -1,5 +1,10 @@
-import * as schema from '../db/schema'
-import type { Db } from '../db/client'
+import type { Db } from '@/shared/infrastructure/db/client'
+import * as authSchema from '@/features/auth/infrastructure/schema'
+import * as groupsSchema from '@/features/groups/infrastructure/schema'
+import * as songsSchema from '@/features/songs/infrastructure/schema'
+import * as playlistsSchema from '@/features/playlists/infrastructure/schema'
+
+const schema = { ...authSchema, ...groupsSchema, ...songsSchema, ...playlistsSchema }
 
 const id = () => crypto.randomUUID()
 
