@@ -8,6 +8,8 @@ import { AppRuntime } from '../services/Runtime'
 import { ByAsset, SetAssetGroupsInput, decodeInput } from '../domain/inputs'
 import { CreateUploadIntentInput } from '../domain/songs'
 
+const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000
+
 function headers() {
   return getRequestHeaders() as unknown as Headers
 }
@@ -22,6 +24,8 @@ export const createUploadIntentFn = createServerFn({ method: 'POST' })
         const access = yield* Access
         const { orgId, userId } = yield* auth.requireActiveOrganizationId(headers())
         yield* access.requireManager(orgId, userId)
+        // Opportunistic cleanup of transfers abandoned more than a day ago.
+        yield* assets.purgeStaleUploads(orgId, new Date(Date.now() - STALE_UPLOAD_MS))
         return yield* assets.createUploadIntent(orgId, data)
       }),
     ),

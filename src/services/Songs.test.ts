@@ -5,6 +5,8 @@ import { NotFoundError } from '../domain/errors'
 import { PAGE_SIZE } from '../domain/pagination'
 import { createTestDb, failWith, runWith } from '../test/db'
 import { seedAsset, seedOrg, seedSong } from '../test/fixtures'
+import { song } from '../db/schema'
+import { eq } from 'drizzle-orm'
 
 let t: Awaited<ReturnType<typeof createTestDb>>
 let run: ReturnType<typeof runWith<Songs>>
@@ -81,5 +83,18 @@ describe('Songs', () => {
     const a = await seedAsset(t.db, song.id, { kind: 'audio' })
     const assets = await run(Effect.flatMap(songs, (s) => s.listAssets(org.id, song.id)))
     expect(assets.map((x) => x.id)).toEqual([a.id])
+  })
+
+  it('never repeats or skips songs across pages when creation times tie', async () => {
+    const org = await seedOrg(t.db)
+    const sameInstant = new Date('2026-01-01T00:00:00Z')
+    for (let i = 0; i < PAGE_SIZE + 7; i++) {
+      const s = await seedSong(t.db, org.id, `Chant ${i}`)
+      await t.db.update(song).set({ createdAt: sameInstant }).where(eq(song.id, s.id))
+    }
+    const page1 = await run(Effect.flatMap(songs, (s) => s.list(org.id, { q: '', page: 1 })))
+    const page2 = await run(Effect.flatMap(songs, (s) => s.list(org.id, { q: '', page: 2 })))
+    const ids = [...page1.rows, ...page2.rows].map((r) => r.id)
+    expect(new Set(ids).size).toBe(PAGE_SIZE + 7)
   })
 })

@@ -154,8 +154,8 @@ export const getMyRoleFn = createServerFn({ method: 'GET' }).handler(() =>
 )
 
 // Wipes the whole choir: every domain table cascades from organization.id at the DB
-// level, so this only needs to (1) clear the S3 objects first, since those don't cascade,
-// then (2) delete the organization row. Owner-only — more destructive than regular admin actions.
+// level; S3 objects don't, so they are removed afterwards from the keys read beforehand.
+// Owner-only — more destructive than regular admin actions.
 export const deleteOrganizationFn = createServerFn({ method: 'POST' }).handler(() =>
   AppRuntime.runPromise(
     Effect.gen(function* () {
@@ -169,12 +169,15 @@ export const deleteOrganizationFn = createServerFn({ method: 'POST' }).handler((
       if (role !== 'owner') {
         yield* Effect.fail(new ForbiddenError({ reason: 'owner-role-required' }))
       }
+      // Keys must be read before the cascade deletes the rows, but objects are only
+      // removed once the organization is gone: if Better Auth refuses the deletion,
+      // the choir keeps its files.
       const storageKeys = yield* assets.listStorageKeysForOrg(orgId)
+      yield* members.deleteOrganization(headers(), orgId)
       yield* Effect.all(
         storageKeys.map((key) => storage.remove(key).pipe(Effect.catchAll(() => Effect.void))),
-        { concurrency: 5 },
+        { concurrency: 5, discard: true },
       )
-      yield* members.deleteOrganization(headers(), orgId)
     }),
   ),
 )

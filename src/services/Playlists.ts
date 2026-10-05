@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from 'effect'
-import { eq, and, asc, inArray } from 'drizzle-orm'
+import { eq, and, asc, desc, inArray } from 'drizzle-orm'
 import { Database } from './Database'
 import { playlist, playlistItem, playlistEventDate, song } from '../db/schema'
 import { NotFoundError, ValidationError } from '../domain/errors'
@@ -87,7 +87,13 @@ export const PlaylistsLive = Layer.effect(
 
     return {
       list: (orgId) =>
-        Effect.promise(() => db.select().from(playlist).where(eq(playlist.organizationId, orgId))),
+        Effect.promise(() =>
+          db
+            .select()
+            .from(playlist)
+            .where(eq(playlist.organizationId, orgId))
+            .orderBy(desc(playlist.createdAt), desc(playlist.id)),
+        ),
       get,
       create: (orgId, name, description) =>
         Effect.promise(() =>
@@ -129,19 +135,24 @@ export const PlaylistsLive = Layer.effect(
             row ? Effect.void : Effect.fail(new NotFoundError({ entity: 'song', id: songId })),
           ),
           Effect.flatMap(() =>
-            Effect.promise(async () => {
-              const existing = await db
-                .select({ position: playlistItem.position })
-                .from(playlistItem)
-                .where(eq(playlistItem.playlistId, playlistId))
-              const nextPosition = existing.reduce((max, r) => Math.max(max, r.position), -1) + 1
-              await db.insert(playlistItem).values({
-                id: crypto.randomUUID(),
-                playlistId,
-                songId,
-                position: nextPosition,
-              })
-            }),
+            Effect.promise(() =>
+              db.transaction(async (tx) => {
+                // Lock the playlist so two concurrent adds can't both pick the same
+                // next position (unique index → one of them would fail).
+                await tx.select({ id: playlist.id }).from(playlist).where(eq(playlist.id, playlistId)).for('update')
+                const existing = await tx
+                  .select({ position: playlistItem.position })
+                  .from(playlistItem)
+                  .where(eq(playlistItem.playlistId, playlistId))
+                const nextPosition = existing.reduce((max, r) => Math.max(max, r.position), -1) + 1
+                await tx.insert(playlistItem).values({
+                  id: crypto.randomUUID(),
+                  playlistId,
+                  songId,
+                  position: nextPosition,
+                })
+              }),
+            ),
           ),
           Effect.asVoid,
         ),

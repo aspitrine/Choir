@@ -34,6 +34,9 @@ services:
       timeout: 5s
       retries: 10
 
+  # The bucket stays private, as in production: the app only hands out presigned
+  # URLs. `anonymous set none` also revokes public access on volumes created when
+  # this script used to make the bucket world-readable.
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -43,7 +46,7 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 chorale chorale-secret &&
       mc mb -p local/chorale &&
-      mc anonymous set download local/chorale
+      mc anonymous set none local/chorale
       "
 
 volumes:

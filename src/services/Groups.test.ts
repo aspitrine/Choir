@@ -61,4 +61,19 @@ describe('Groups', () => {
     await run(Effect.flatMap(Groups, (s) => s.remove(org.id, g.id)))
     expect(await run(Effect.flatMap(Groups, (s) => s.list(org.id)))).toEqual([])
   })
+
+  it('searches LIKE wildcards literally and pages in a stable order', async () => {
+    const org = await seedOrg(t.db)
+    await seedGroup(t.db, org.id, 'Ténors_1')
+    await seedGroup(t.db, org.id, 'TénorsX1')
+    await seedGroup(t.db, org.id, '100% jeunes')
+
+    const underscore = await run(Effect.flatMap(Groups, (s) => s.search(org.id, { q: '_1', page: 1 })))
+    expect(underscore.rows.map((g) => g.name)).toEqual(['Ténors_1'])
+    const percent = await run(Effect.flatMap(Groups, (s) => s.search(org.id, { q: '%', page: 1 })))
+    expect(percent.rows.map((g) => g.name)).toEqual(['100% jeunes'])
+
+    const all = await run(Effect.flatMap(Groups, (s) => s.search(org.id, { q: '', page: 1 })))
+    expect(all.rows.map((g) => g.name)).toEqual(['100% jeunes', 'TénorsX1', 'Ténors_1'].sort())
+  })
 })

@@ -19,6 +19,7 @@ import { CreateGroupForm } from '@/domain/groups'
 import { searchGroupsFn, createGroupFn, deleteGroupFn } from '@/server/groups'
 import { getMyRoleFn } from '@/server/members'
 import { useConfirm } from '@/components/confirm-dialog'
+import { attempt } from '@/lib/attempt'
 
 const GroupsSearch = Schema.Struct({
   q: Schema.optional(Schema.String),
@@ -124,7 +125,8 @@ function GroupsPage() {
                             confirmLabel: 'Supprimer',
                           })
                           if (!ok) return
-                          await deleteGroupFn({ data: { groupId: grp.id } })
+                          if (!(await attempt(() => deleteGroupFn({ data: { groupId: grp.id } }), 'Suppression impossible')))
+                            return
                           await router.invalidate()
                         }}
                       >

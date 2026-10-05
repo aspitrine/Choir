@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from 'effect'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, lt, inArray } from 'drizzle-orm'
 import { Database } from './Database'
 import { Storage } from './Storage'
 import { song, asset, assetGroup, group } from '../db/schema'
@@ -39,10 +39,15 @@ export class Assets extends Context.Tag('Assets')<
       songId: string,
     ) => Effect.Effect<Array<{ assetId: string; group: typeof group.$inferSelect }>>
     /**
-     * Deletes every asset of a song, objects first. Run before deleting the song:
-     * the DB cascade would drop the rows but leave the files in storage.
+     * Deletes every asset of a song. Run before deleting the song: the DB cascade
+     * would drop the rows but leave the files in storage.
      */
     readonly removeAllForSong: (orgId: string, songId: string) => Effect.Effect<void, NotFoundError>
+    /**
+     * Deletes assets of the org stuck in "uploading" since before `olderThan`
+     * (tab closed mid-transfer…), with whatever object may have been written.
+     */
+    readonly purgeStaleUploads: (orgId: string, olderThan: Date) => Effect.Effect<number>
     /** Storage keys for every asset in the org — for cleaning up S3 objects before deleting the org. */
     readonly listStorageKeysForOrg: (orgId: string) => Effect.Effect<Array<string>>
   }
@@ -78,6 +83,13 @@ export const AssetsLive = Layer.effect(
         Effect.flatMap(([row]) =>
           row ? Effect.succeed(row.asset) : Effect.fail(new NotFoundError({ entity: 'asset', id: assetId })),
         ),
+      )
+
+    // Best effort: a missing object must not fail the deletion it belongs to.
+    const removeObjects = (keys: ReadonlyArray<string>) =>
+      Effect.all(
+        keys.map((key) => storage.remove(key).pipe(Effect.catchAll(() => Effect.void))),
+        { concurrency: 5, discard: true },
       )
 
     const setGroups = (orgId: string, assetId: string, groupIds: ReadonlyArray<string>) =>
@@ -205,17 +217,27 @@ export const AssetsLive = Layer.effect(
               ? Effect.fail(new NotFoundError({ entity: 'song', id: songId }))
               : Effect.succeed(rows.flatMap((r) => (r.id && r.storageKey ? [r.storageKey] : []))),
           ),
-          Effect.flatMap((keys) =>
-            Effect.all(
-              // A missing object must not block the deletion of the song.
-              keys.map((key) => storage.remove(key).pipe(Effect.catchAll(() => Effect.void))),
-              { concurrency: 5 },
-            ),
+          // Rows first: a leftover object is harmless, a row pointing at a deleted
+          // object is a broken file in the UI.
+          Effect.tap(() => Effect.promise(() => db.delete(asset).where(eq(asset.songId, songId)))),
+          Effect.flatMap(removeObjects),
+        ),
+
+      purgeStaleUploads: (orgId, olderThan) =>
+        Effect.promise(() =>
+          db
+            .select({ id: asset.id, storageKey: asset.storageKey })
+            .from(asset)
+            .innerJoin(song, eq(asset.songId, song.id))
+            .where(and(eq(song.organizationId, orgId), eq(asset.status, 'uploading'), lt(asset.createdAt, olderThan))),
+        ).pipe(
+          Effect.tap((rows) =>
+            rows.length > 0
+              ? Effect.promise(() => db.delete(asset).where(inArray(asset.id, rows.map((r) => r.id))))
+              : Effect.void,
           ),
-          Effect.flatMap(() =>
-            Effect.promise(() => db.delete(asset).where(eq(asset.songId, songId))),
-          ),
-          Effect.asVoid,
+          Effect.tap((rows) => removeObjects(rows.map((r) => r.storageKey))),
+          Effect.map((rows) => rows.length),
         ),
       listStorageKeysForOrg: (orgId) =>
         Effect.promise(async () => {

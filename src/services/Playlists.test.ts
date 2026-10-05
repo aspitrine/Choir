@@ -151,4 +151,14 @@ describe('Playlists', () => {
     const after = await run(Effect.flatMap(Playlists, (s) => s.listItems(org.id, p.id)))
     expect(titles(after)).toEqual(['A', 'B', 'C'])
   })
+
+  it('gives distinct positions to songs added concurrently', async () => {
+    const org = await seedOrg(t.db)
+    const p = await seedPlaylist(t.db, org.id, 'P')
+    const songs = await Promise.all(Array.from({ length: 6 }, (_, i) => seedSong(t.db, org.id, `S${i}`)))
+
+    await Promise.all(songs.map((s) => run(Effect.flatMap(Playlists, (pl) => pl.addSong(org.id, p.id, s.id)))))
+    const items = await run(Effect.flatMap(Playlists, (s) => s.listItems(org.id, p.id)))
+    expect(items.map((i) => i.position)).toEqual([0, 1, 2, 3, 4, 5])
+  })
 })

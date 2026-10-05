@@ -308,4 +308,12 @@ describe('Members', () => {
       expect(await t.db.select().from(memberGroup)).toEqual([])
     })
   })
+
+  it('matches member search text literally', async () => {
+    const org = await seedOrg(t.db)
+    await seedMember(t.db, org.id, (await seedUser(t.db, { name: 'Anne_Marie', email: 'am@test.local' })).id, 'member')
+    await seedMember(t.db, org.id, (await seedUser(t.db, { name: 'AnneXMarie', email: 'ax@test.local' })).id, 'member')
+    const page = await run(Effect.flatMap(Members, (s) => s.search(org.id, { q: 'e_m', page: 1 })))
+    expect(page.rows.map((r) => r.user.name)).toEqual(['Anne_Marie'])
+  })
 })

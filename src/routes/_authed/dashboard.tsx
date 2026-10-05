@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { listUpcomingPlaylistsFn } from '@/server/playlists'
+import { formatEventDate } from '@/lib/dates'
 
 export const Route = createFileRoute('/_authed/dashboard')({
   loader: async () => {
@@ -13,10 +14,6 @@ export const Route = createFileRoute('/_authed/dashboard')({
   component: Dashboard,
 })
 
-const dateFormatter = new Intl.DateTimeFormat('fr-FR', {
-  dateStyle: 'long',
-  timeStyle: 'short',
-})
 
 function Dashboard() {
   const upcoming = Route.useLoaderData()
@@ -50,7 +47,7 @@ function Dashboard() {
                 <span className="font-medium">{playlist.name}</span>
                 <span className="text-muted-foreground">
                   {nextEventDate
-                    ? dateFormatter.format(new Date(nextEventDate))
+                    ? formatEventDate(nextEventDate)
                     : eventDateCount === 0
                       ? 'Pas de date'
                       : null}

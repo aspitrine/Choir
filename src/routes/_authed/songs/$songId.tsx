@@ -23,6 +23,7 @@ import { PdfViewer } from '@/components/pdf-viewer'
 import { AudioPlayer } from '@/components/audio-player'
 import { useConfirm } from '@/components/confirm-dialog'
 import { PLAYABLE_AUDIO_MIME_TYPES, SCORE_MIME_TYPES, guessAssetKind } from '@/domain/songs'
+import { attempt } from '@/lib/attempt'
 
 export const Route = createFileRoute('/_authed/songs/$songId')({
   loader: async ({ params }) => {
@@ -77,7 +78,7 @@ function SongDetailPage() {
                   confirmLabel: 'Supprimer',
                 })
                 if (!ok) return
-                await deleteSongFn({ data: { songId: song.id } })
+                if (!(await attempt(() => deleteSongFn({ data: { songId: song.id } }), 'Suppression impossible'))) return
                 navigate({ to: '/songs' })
               }}
             >
@@ -224,8 +225,12 @@ function AssetRow({
                 disabled={saving}
                 onClick={async () => {
                   setSaving(true)
-                  await setAssetGroupsFn({ data: { assetId: asset.id, groupIds: [...selected] } })
+                  const ok = await attempt(
+                    () => setAssetGroupsFn({ data: { assetId: asset.id, groupIds: [...selected] } }),
+                    'Enregistrement impossible',
+                  )
                   setSaving(false)
+                  if (!ok) return
                   setOpen(false)
                   onChanged()
                 }}
@@ -268,7 +273,7 @@ function AssetRow({
                 confirmLabel: 'Supprimer',
               })
               if (!ok) return
-              await deleteAssetFn({ data: { assetId: asset.id } })
+              if (!(await attempt(() => deleteAssetFn({ data: { assetId: asset.id } }), 'Suppression impossible'))) return
               onChanged()
             }}
           >
@@ -314,6 +319,7 @@ function UploadForm({
     }
     setError(null)
     setUploading(true)
+    let pendingAssetId: string | null = null
     try {
       const { assetId, uploadUrl } = await createUploadIntentFn({
         data: {
@@ -325,6 +331,7 @@ function UploadForm({
           groupIds: [...groupIds],
         },
       })
+      pendingAssetId = assetId
       const res = await fetch(uploadUrl, {
         method: 'PUT',
         body: file,
@@ -332,12 +339,15 @@ function UploadForm({
       })
       if (!res.ok) throw new Error('upload failed')
       await confirmUploadFn({ data: { assetId } })
+      pendingAssetId = null
       setFile(null)
       setLabel('')
       setLabelTouched(false)
       setGroupIds(new Set())
       onUploaded()
     } catch {
+      // Don't leave a row stuck in "uploading" behind a failed transfer.
+      if (pendingAssetId) await deleteAssetFn({ data: { assetId: pendingAssetId } }).catch(() => {})
       setError("Échec de l'envoi")
     } finally {
       setUploading(false)

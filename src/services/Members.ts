@@ -1,11 +1,11 @@
 import { Context, Effect, Layer } from 'effect'
-import { eq, and, or, ilike, count, inArray } from 'drizzle-orm'
+import { eq, and, or, ilike, count, inArray, asc, desc } from 'drizzle-orm'
 import { Database } from './Database'
 import { member, user, invitation, invitationGroup, memberGroup, group } from '../db/schema'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { auth } from '../lib/auth'
 import { ForbiddenError, NotFoundError, ValidationError } from '../domain/errors'
-import { PAGE_SIZE, type Page } from '../domain/pagination'
+import { PAGE_SIZE, containsPattern, type Page } from '../domain/pagination'
 import { requireOrgGroups } from './orgGroups'
 
 export type InviteRole = 'admin' | 'member'
@@ -134,9 +134,10 @@ export const MembersLive = Layer.effect(
 
     return {
       search: (orgId, { q, page }) => {
+        const pattern = containsPattern(q)
         const where = and(
           eq(member.organizationId, orgId),
-          q.trim() ? or(ilike(user.name, `%${q.trim()}%`), ilike(user.email, `%${q.trim()}%`)) : undefined,
+          pattern ? or(ilike(user.name, pattern), ilike(user.email, pattern)) : undefined,
         )
         return Effect.promise(async () => {
           const [rows, [{ total }]] = await Promise.all([
@@ -145,6 +146,7 @@ export const MembersLive = Layer.effect(
               .from(member)
               .innerJoin(user, eq(user.id, member.userId))
               .where(where)
+              .orderBy(asc(user.name), asc(member.id))
               .limit(PAGE_SIZE)
               .offset((page - 1) * PAGE_SIZE),
             db
@@ -175,15 +177,12 @@ export const MembersLive = Layer.effect(
       },
 
       searchInvitations: (orgId, { q, page }) => {
+        const pattern = containsPattern(q)
         const where = and(
           eq(invitation.organizationId, orgId),
           eq(invitation.status, 'pending'),
-          q.trim()
-            ? or(
-                ilike(invitation.email, `%${q.trim()}%`),
-                ilike(invitation.firstName, `%${q.trim()}%`),
-                ilike(invitation.lastName, `%${q.trim()}%`),
-              )
+          pattern
+            ? or(ilike(invitation.email, pattern), ilike(invitation.firstName, pattern), ilike(invitation.lastName, pattern))
             : undefined,
         )
         return Effect.promise(async () => {
@@ -192,6 +191,7 @@ export const MembersLive = Layer.effect(
               .select()
               .from(invitation)
               .where(where)
+              .orderBy(desc(invitation.createdAt), asc(invitation.id))
               .limit(PAGE_SIZE)
               .offset((page - 1) * PAGE_SIZE),
             db.select({ total: count() }).from(invitation).where(where),

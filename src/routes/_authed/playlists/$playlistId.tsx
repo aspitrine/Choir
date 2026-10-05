@@ -1,6 +1,5 @@
 import { createFileRoute, Link, redirect, useRouter } from '@tanstack/react-router'
 import { useEffect, useId, useState } from 'react'
-import { toast } from 'sonner'
 import {
   DndContext,
   closestCenter,
@@ -52,6 +51,8 @@ import { useAppForm } from '@/lib/form'
 import { CreateSongForm } from '@/domain/songs'
 import { PdfViewer } from '@/components/pdf-viewer'
 import { AudioPlayer } from '@/components/audio-player'
+import { attempt } from '@/lib/attempt'
+import { formatEventDate } from '@/lib/dates'
 
 export const Route = createFileRoute('/_authed/playlists/$playlistId')({
   loader: async ({ params }) => {
@@ -102,7 +103,10 @@ function PlaylistDetailPage() {
                   confirmLabel: 'Supprimer',
                 })
                 if (!ok) return
-                await deletePlaylistFn({ data: { playlistId: playlist.id } })
+                if (
+                  !(await attempt(() => deletePlaylistFn({ data: { playlistId: playlist.id } }), 'Suppression impossible'))
+                )
+                  return
                 navigate({ to: '/playlists' })
               }}
             >
@@ -185,11 +189,10 @@ function SongList({
     const newIndex = order.indexOf(String(over.id))
     const next = arrayMove(order, oldIndex, newIndex)
     setOrder(next)
-    try {
-      await reorderPlaylistFn({ data: { playlistId, itemIdsInOrder: next } })
-    } catch {
-      toast.error("L'ordre n'a pas pu être enregistré, la playlist a été rechargée")
-    }
+    await attempt(
+      () => reorderPlaylistFn({ data: { playlistId, itemIdsInOrder: next } }),
+      "L'ordre n'a pas pu être enregistré, la playlist a été rechargée",
+    )
     onChanged()
   }
 
@@ -218,7 +221,7 @@ function SongList({
                 <AddSongTable
                   excludeSongIds={excludeSongIds}
                   onAdd={async (songId) => {
-                    await addSongToPlaylistFn({ data: { playlistId, songId } })
+                    await attempt(() => addSongToPlaylistFn({ data: { playlistId, songId } }), 'Ajout impossible')
                     onChanged()
                   }}
                 />
@@ -247,7 +250,7 @@ function SongList({
                       confirmLabel: 'Retirer',
                     })
                     if (!ok) return
-                    await removePlaylistItemFn({ data: { playlistId, itemId } })
+                    await attempt(() => removePlaylistItemFn({ data: { playlistId, itemId } }), 'Retrait impossible')
                     onChanged()
                   }}
                 />
@@ -570,7 +573,6 @@ function AddSongTable({
   )
 }
 
-const eventDateFormatter = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long', timeStyle: 'short' })
 
 function EventDatesCard({
   playlistId,
@@ -599,18 +601,21 @@ function EventDatesCard({
         <div className="space-y-2">
           {eventDates.map((d) => (
             <div key={d.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-              <span>{eventDateFormatter.format(new Date(d.eventDate))}</span>
+              <span>{formatEventDate(d.eventDate)}</span>
               {isManager ? (
                 <button
                   className="text-xs text-destructive hover:underline"
                   onClick={async () => {
                     const ok = await confirm({
                       title: 'Supprimer cette date',
-                      description: eventDateFormatter.format(new Date(d.eventDate)),
+                      description: formatEventDate(d.eventDate),
                       confirmLabel: 'Supprimer',
                     })
                     if (!ok) return
-                    await removeEventDateFn({ data: { playlistId, eventDateId: d.id } })
+                    await attempt(
+                      () => removeEventDateFn({ data: { playlistId, eventDateId: d.id } }),
+                      'Suppression impossible',
+                    )
                     onChanged()
                   }}
                 >
@@ -640,9 +645,13 @@ function EventDatesCard({
               disabled={adding || !value}
               onClick={async () => {
                 setAdding(true)
-                await addEventDateFn({ data: { playlistId, eventDate: new Date(value).toISOString() } })
-                setValue('')
+                const ok = await attempt(
+                  () => addEventDateFn({ data: { playlistId, eventDate: new Date(value).toISOString() } }),
+                  "Ajout de la date impossible",
+                )
                 setAdding(false)
+                if (!ok) return
+                setValue('')
                 onChanged()
               }}
             >
@@ -734,9 +743,13 @@ function ShareLinksCard({
               disabled={creating}
               onClick={async () => {
                 setCreating(true)
-                await createShareLinkFn({ data: { playlistId, groupIds: [...groupIds] } })
-                setGroupIds(new Set())
+                const ok = await attempt(
+                  () => createShareLinkFn({ data: { playlistId, groupIds: [...groupIds] } }),
+                  'Création du lien impossible',
+                )
                 setCreating(false)
+                if (!ok) return
+                setGroupIds(new Set())
                 onChanged()
               }}
             >
@@ -762,7 +775,10 @@ function ShareLinksCard({
                           confirmLabel: 'Révoquer',
                         })
                         if (!ok) return
-                        await revokeShareLinkFn({ data: { shareLinkId: link.id } })
+                        if (
+                          !(await attempt(() => revokeShareLinkFn({ data: { shareLinkId: link.id } }), 'Révocation impossible'))
+                        )
+                          return
                         onChanged()
                       }}
                     >

@@ -34,6 +34,7 @@ import { listGroupsFn } from '@/server/groups'
 import { authClient, useSession } from '@/lib/auth-client'
 import type { InviteRole } from '@/services/Members'
 import type { Page } from '@/domain/pagination'
+import { attempt } from '@/lib/attempt'
 
 export const Route = createFileRoute('/_authed/members/')({
   loader: async () => {
@@ -186,7 +187,10 @@ function MembersPage() {
                 })
                 if (!ok) return
                 setDeleting(true)
-                await deleteOrganizationFn()
+                if (!(await attempt(() => deleteOrganizationFn(), 'Suppression de la chorale impossible'))) {
+                  setDeleting(false)
+                  return
+                }
                 window.location.assign('/')
               }}
             >
@@ -385,7 +389,10 @@ function PendingInvitationsCard({
                           confirmLabel: 'Révoquer',
                         })
                         if (!ok) return
-                        await revokeInviteFn({ data: { invitationId: invitation.id } })
+                        await attempt(
+                          () => revokeInviteFn({ data: { invitationId: invitation.id } }),
+                          'Révocation impossible',
+                        )
                         await refetch()
                       }}
                     >
@@ -443,9 +450,11 @@ function MemberRow({
             className="rounded-md border bg-background px-2 py-1 text-sm"
             value={row.member.role}
             onChange={async (e) => {
-              await updateMemberRoleFn({
-                data: { memberId: row.member.id, role: e.target.value as InviteRole },
-              })
+              await attempt(
+                () => updateMemberRoleFn({ data: { memberId: row.member.id, role: e.target.value as InviteRole } }),
+                'Modification du rôle impossible',
+              )
+              // Refresh even on failure so the select shows the actual role again.
               onChanged()
             }}
           >
@@ -500,8 +509,12 @@ function MemberRow({
                 disabled={saving}
                 onClick={async () => {
                   setSaving(true)
-                  await updateMemberGroupsFn({ data: { memberId: row.member.id, groupIds: [...selected] } })
+                  const ok = await attempt(
+                    () => updateMemberGroupsFn({ data: { memberId: row.member.id, groupIds: [...selected] } }),
+                    'Enregistrement impossible',
+                  )
                   setSaving(false)
+                  if (!ok) return
                   setGroupsOpen(false)
                   onChanged()
                 }}
@@ -524,7 +537,8 @@ function MemberRow({
                   confirmLabel: 'Retirer',
                 })
                 if (!ok) return
-                await removeMemberFn({ data: { memberId: row.member.id } })
+                if (!(await attempt(() => removeMemberFn({ data: { memberId: row.member.id } }), 'Retrait impossible')))
+                  return
                 onChanged()
               }}
             >

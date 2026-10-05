@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import { Effect, Layer } from 'effect'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { Assets, AssetsLive, safeFilename } from './Assets'
 import { NotFoundError, StorageError } from '../domain/errors'
 import { asset } from '../db/schema'
@@ -179,6 +179,27 @@ describe('Assets', () => {
     expect(storage.removed).toEqual([])
     expect(await t.db.select().from(asset)).toHaveLength(1)
   })
+  it('purges uploads abandoned before the cutoff, in this organization only', async () => {
+    const org = await seedOrg(t.db, 'A')
+    const other = await seedOrg(t.db, 'B')
+    const song = await seedSong(t.db, org.id, 'Ave')
+    const old = new Date(Date.now() - 2 * 24 * 3600 * 1000)
+    const stale = await seedAsset(t.db, song.id, { status: 'uploading' })
+    const fresh = await seedAsset(t.db, song.id, { status: 'uploading' })
+    const readyOld = await seedAsset(t.db, song.id, { status: 'ready' })
+    const otherStale = await seedAsset(t.db, (await seedSong(t.db, other.id, 'X')).id, { status: 'uploading' })
+    await t.db.update(asset).set({ createdAt: old }).where(inArray(asset.id, [stale.id, readyOld.id, otherStale.id]))
+
+    const purged = await run(
+      Effect.flatMap(Assets, (s) => s.purgeStaleUploads(org.id, new Date(Date.now() - 24 * 3600 * 1000))),
+    )
+    expect(purged).toBe(1)
+    expect(storage.removed).toEqual([stale.storageKey])
+    expect((await t.db.select().from(asset)).map((r) => r.id).sort()).toEqual(
+      [fresh.id, readyOld.id, otherStale.id].sort(),
+    )
+  })
+
 })
 
 describe('safeFilename', () => {

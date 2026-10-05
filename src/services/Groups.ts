@@ -1,9 +1,9 @@
 import { Context, Effect, Layer } from 'effect'
-import { eq, and, ilike, count } from 'drizzle-orm'
+import { eq, and, ilike, count, asc } from 'drizzle-orm'
 import { Database } from './Database'
 import { group } from '../db/schema'
 import { NotFoundError } from '../domain/errors'
-import { PAGE_SIZE, type Page } from '../domain/pagination'
+import { PAGE_SIZE, containsPattern, type Page } from '../domain/pagination'
 
 export class Groups extends Context.Tag('Groups')<
   Groups,
@@ -41,19 +41,21 @@ export const GroupsLive = Layer.effect(
 
     return {
       list: (orgId) =>
-        Effect.promise(() => db.select().from(group).where(eq(group.organizationId, orgId))),
+        Effect.promise(() =>
+          db.select().from(group).where(eq(group.organizationId, orgId)).orderBy(asc(group.name), asc(group.id)),
+        ),
 
       search: (orgId, { q, page }) => {
-        const where = and(
-          eq(group.organizationId, orgId),
-          q.trim() ? ilike(group.name, `%${q.trim()}%`) : undefined,
-        )
+        const pattern = containsPattern(q)
+        const where = and(eq(group.organizationId, orgId), pattern ? ilike(group.name, pattern) : undefined)
         return Effect.promise(async () => {
           const [rows, [{ total }]] = await Promise.all([
             db
               .select()
               .from(group)
               .where(where)
+              // Deterministic order, otherwise pages can repeat or skip rows.
+              .orderBy(asc(group.name), asc(group.id))
               .limit(PAGE_SIZE)
               .offset((page - 1) * PAGE_SIZE),
             db.select({ total: count() }).from(group).where(where),

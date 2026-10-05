@@ -4,7 +4,7 @@ import { Database } from './Database'
 import { song, asset } from '../db/schema'
 import { NotFoundError } from '../domain/errors'
 import type { CreateSongInput } from '../domain/songs'
-import { PAGE_SIZE, type Page } from '../domain/pagination'
+import { PAGE_SIZE, containsPattern, type Page } from '../domain/pagination'
 
 export class Songs extends Context.Tag('Songs')<
   Songs,
@@ -56,9 +56,10 @@ export const SongsLive = Layer.effect(
 
     return {
       list: (orgId, { q, page }) => {
+        const pattern = containsPattern(q)
         const where = and(
           eq(song.organizationId, orgId),
-          q.trim() ? or(ilike(song.title, `%${q.trim()}%`), ilike(song.composer, `%${q.trim()}%`)) : undefined,
+          pattern ? or(ilike(song.title, pattern), ilike(song.composer, pattern)) : undefined,
         )
         return Effect.promise(async () => {
           const [rows, [{ total }]] = await Promise.all([
@@ -66,7 +67,8 @@ export const SongsLive = Layer.effect(
               .select()
               .from(song)
               .where(where)
-              .orderBy(desc(song.createdAt))
+              // id breaks createdAt ties (bulk imports) so pages never overlap.
+              .orderBy(desc(song.createdAt), desc(song.id))
               .limit(PAGE_SIZE)
               .offset((page - 1) * PAGE_SIZE),
             db.select({ total: count() }).from(song).where(where),
@@ -76,7 +78,7 @@ export const SongsLive = Layer.effect(
       },
       listAll: (orgId) =>
         Effect.promise(() =>
-          db.select().from(song).where(eq(song.organizationId, orgId)).orderBy(desc(song.createdAt)),
+          db.select().from(song).where(eq(song.organizationId, orgId)).orderBy(desc(song.createdAt), desc(song.id)),
         ),
       get,
       create: (orgId, input) =>

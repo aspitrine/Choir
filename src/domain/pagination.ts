@@ -14,3 +14,13 @@ export interface Page<T> {
   page: number
   pageSize: number
 }
+
+/**
+ * ILIKE pattern matching `q` literally anywhere: `%`, `_` and `\` typed by the
+ * user are escaped instead of acting as wildcards. Undefined for a blank query.
+ */
+export function containsPattern(q: string): string | undefined {
+  const trimmed = q.trim()
+  if (!trimmed) return undefined
+  return `%${trimmed.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+}
