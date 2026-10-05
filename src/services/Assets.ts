@@ -5,6 +5,7 @@ import { Storage } from './Storage'
 import { song, asset, assetGroup, group } from '../db/schema'
 import { NotFoundError, StorageError } from '../domain/errors'
 import type { CreateUploadIntentInput } from '../domain/songs'
+import { requireOrgGroups } from './orgGroups'
 
 export class Assets extends Context.Tag('Assets')<
   Assets,
@@ -65,13 +66,12 @@ export const AssetsLive = Layer.effect(
 
     const setGroups = (orgId: string, assetId: string, groupIds: Array<string>) =>
       getOwnedAsset(orgId, assetId).pipe(
-        Effect.flatMap(() =>
+        Effect.flatMap(() => requireOrgGroups(db, orgId, groupIds)),
+        Effect.flatMap((ids) =>
           Effect.promise(async () => {
             await db.delete(assetGroup).where(eq(assetGroup.assetId, assetId))
-            if (groupIds.length > 0) {
-              await db.insert(assetGroup).values(
-                groupIds.map((groupId) => ({ assetId, groupId })),
-              )
+            if (ids.length > 0) {
+              await db.insert(assetGroup).values(ids.map((groupId) => ({ assetId, groupId })))
             }
           }),
         ),
@@ -90,7 +90,8 @@ export const AssetsLive = Layer.effect(
           Effect.flatMap(([row]) =>
             row ? Effect.succeed(row) : Effect.fail(new NotFoundError({ entity: 'song', id: input.songId })),
           ),
-          Effect.flatMap(() => {
+          Effect.flatMap(() => requireOrgGroups(db, orgId, input.groupIds)),
+          Effect.flatMap((groupIds) => {
             const assetId = crypto.randomUUID()
             const storageKey = `org/${orgId}/song/${input.songId}/${assetId}-${input.filename}`
             return storage.presignPut(storageKey, input.contentType).pipe(
@@ -108,11 +109,9 @@ export const AssetsLive = Layer.effect(
                 ).pipe(Effect.map(() => ({ assetId, uploadUrl }))),
               ),
               Effect.tap(({ assetId }) =>
-                input.groupIds.length > 0
+                groupIds.length > 0
                   ? Effect.promise(() =>
-                      db.insert(assetGroup).values(
-                        input.groupIds.map((groupId) => ({ assetId, groupId })),
-                      ),
+                      db.insert(assetGroup).values(groupIds.map((groupId) => ({ assetId, groupId }))),
                     )
                   : Effect.void,
               ),

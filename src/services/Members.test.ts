@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import { Effect, Layer } from 'effect'
-import { invitation, memberGroup } from '../db/schema'
-import { ValidationError } from '../domain/errors'
+import { invitation, invitationGroup, memberGroup } from '../db/schema'
+import { ForbiddenError, NotFoundError, ValidationError } from '../domain/errors'
 import { createTestDb, failWith, runWith } from '../test/db'
 import { seedGroup, seedMember, seedOrg, seedUser } from '../test/fixtures'
 import { Members, MembersLive } from './Members'
@@ -120,33 +120,90 @@ describe('Members', () => {
     expect(err.message).toBe('User is already a member')
   })
 
-  it('copies invitation groups onto the member on acceptance', async () => {
+  async function acceptedInvite() {
     const org = await seedOrg(t.db)
     const owner = await seedUser(t.db)
     const singer = await seedUser(t.db)
     const m = await seedMember(t.db, org.id, singer.id, 'member')
-    const inv = await seedInvitation(org.id, owner.id, 'singer@test.local')
+    const inv = await seedInvitation(org.id, owner.id, singer.email, 'accepted')
     const [alto, sop] = [await seedGroup(t.db, org.id, 'Alto'), await seedGroup(t.db, org.id, 'Soprano')]
-    const { invitationGroup } = await import('../db/schema')
     await t.db.insert(invitationGroup).values([
       { invitationId: inv.id, groupId: alto.id },
       { invitationId: inv.id, groupId: sop.id },
     ])
+    return { org, singer, member: m, invitation: inv, groups: [alto, sop] }
+  }
 
-    await run(Effect.flatMap(Members, (s) => s.finalizeAcceptance(m.id, inv.id)))
+  it('copies invitation groups onto the member on acceptance, idempotently', async () => {
+    const { singer, member: m, invitation: inv, groups } = await acceptedInvite()
+
+    await run(Effect.flatMap(Members, (s) => s.finalizeAcceptance(singer.id, m.id, inv.id)))
+    await run(Effect.flatMap(Members, (s) => s.finalizeAcceptance(singer.id, m.id, inv.id)))
     const rows = await t.db.select().from(memberGroup)
-    expect(rows.map((r) => r.groupId).sort()).toEqual([alto.id, sop.id].sort())
+    expect(rows.map((r) => r.groupId).sort()).toEqual(groups.map((g) => g.id).sort())
+  })
+
+  it('refuses to finalize for someone else, another org or a pending invitation', async () => {
+    const { org, singer, member: m, invitation: inv } = await acceptedInvite()
+    const intruder = await seedUser(t.db)
+    const intruderMember = await seedMember(t.db, (await seedOrg(t.db, 'Other')).id, intruder.id, 'member')
+    const pending = await seedInvitation(org.id, singer.id, 'later@test.local')
+
+    for (const [userId, memberId, invitationId] of [
+      [intruder.id, m.id, inv.id], // someone else's member row
+      [intruder.id, intruderMember.id, inv.id], // invitation of another org
+      [singer.id, m.id, pending.id], // not accepted yet
+    ]) {
+      const err = await fail(Effect.flatMap(Members, (s) => s.finalizeAcceptance(userId!, memberId!, invitationId!)))
+      expect(err).toBeInstanceOf(ForbiddenError)
+    }
+    expect(await t.db.select().from(memberGroup)).toEqual([])
   })
 
   it('replaces member groups', async () => {
     const org = await seedOrg(t.db)
     const m = await seedMember(t.db, org.id, (await seedUser(t.db)).id, 'member')
     const [a, b] = [await seedGroup(t.db, org.id, 'A'), await seedGroup(t.db, org.id, 'B')]
-    await run(Effect.flatMap(Members, (s) => s.updateMemberGroups(m.id, [a.id])))
-    await run(Effect.flatMap(Members, (s) => s.updateMemberGroups(m.id, [b.id])))
+    await run(Effect.flatMap(Members, (s) => s.updateMemberGroups(org.id, m.id, [a.id])))
+    await run(Effect.flatMap(Members, (s) => s.updateMemberGroups(org.id, m.id, [b.id, b.id])))
     expect((await t.db.select().from(memberGroup)).map((r) => r.groupId)).toEqual([b.id])
-    await run(Effect.flatMap(Members, (s) => s.updateMemberGroups(m.id, [])))
+    await run(Effect.flatMap(Members, (s) => s.updateMemberGroups(org.id, m.id, [])))
     expect(await t.db.select().from(memberGroup)).toEqual([])
+  })
+
+  it('refuses member groups across organizations', async () => {
+    const org = await seedOrg(t.db, 'A')
+    const other = await seedOrg(t.db, 'B')
+    const mine = await seedMember(t.db, org.id, (await seedUser(t.db)).id, 'member')
+    const theirs = await seedMember(t.db, other.id, (await seedUser(t.db)).id, 'member')
+    const myGroup = await seedGroup(t.db, org.id, 'Mine')
+    const theirGroup = await seedGroup(t.db, other.id, 'Theirs')
+
+    for (const eff of [
+      Effect.flatMap(Members, (s) => s.updateMemberGroups(org.id, theirs.id, [myGroup.id])),
+      Effect.flatMap(Members, (s) => s.updateMemberGroups(org.id, mine.id, [theirGroup.id])),
+    ]) {
+      expect(await fail(eff)).toBeInstanceOf(NotFoundError)
+    }
+    expect(await t.db.select().from(memberGroup)).toEqual([])
+  })
+
+  it('rejects an invitation with a group of another organization before creating it', async () => {
+    const org = await seedOrg(t.db, 'A')
+    const foreign = await seedGroup(t.db, (await seedOrg(t.db, 'B')).id, 'Theirs')
+    const err = await fail(
+      Effect.flatMap(Members, (s) =>
+        s.createInvite(headers, org.id, {
+          email: 'x@y.z',
+          firstName: null,
+          lastName: null,
+          role: 'member',
+          groupIds: [foreign.id],
+        }),
+      ),
+    )
+    expect(err).toBeInstanceOf(NotFoundError)
+    expect(authApi.createInvitation).not.toHaveBeenCalled()
   })
 
   it('forbids changing your own role without calling Better Auth', async () => {

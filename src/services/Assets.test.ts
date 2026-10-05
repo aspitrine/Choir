@@ -119,4 +119,19 @@ describe('Assets', () => {
     await seedAsset(t.db, (await seedSong(t.db, other.id, 'B')).id)
     expect(await run(Effect.flatMap(Assets, (s) => s.listStorageKeysForOrg(org.id)))).toEqual([mine.storageKey])
   })
+
+  it('refuses tagging with a group of another organization', async () => {
+    const org = await seedOrg(t.db, 'A')
+    const song = await seedSong(t.db, org.id, 'Ave')
+    const a = await seedAsset(t.db, song.id)
+    const foreign = await seedGroup(t.db, (await seedOrg(t.db, 'B')).id, 'Theirs')
+
+    expect(await fail(Effect.flatMap(Assets, (s) => s.setGroups(org.id, a.id, [foreign.id])))).toBeInstanceOf(
+      NotFoundError,
+    )
+    expect(
+      await fail(Effect.flatMap(Assets, (s) => s.createUploadIntent(org.id, intent(song.id, [foreign.id])))),
+    ).toBeInstanceOf(NotFoundError)
+    expect(await t.db.select().from(asset)).toHaveLength(1)
+  })
 })

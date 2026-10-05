@@ -103,7 +103,7 @@ export const updateMemberGroupsFn = createServerFn({ method: 'POST' })
         const access = yield* Access
         const { orgId, userId } = yield* auth.requireActiveOrganizationId(headers())
         yield* access.requireManager(orgId, userId)
-        yield* members.updateMemberGroups(data.memberId, data.groupIds)
+        yield* members.updateMemberGroups(orgId, data.memberId, data.groupIds)
       }),
     ),
   )
@@ -124,8 +124,8 @@ export const removeMemberFn = createServerFn({ method: 'POST' })
   )
 
 // Called by the invitee right after authClient.organization.acceptInvitation() succeeds
-// client-side. Only needs a valid session — the invitation/member link was already
-// validated by Better Auth's own accept flow.
+// client-side. The service checks the member row is the caller's own and the
+// invitation was accepted into that same organization.
 export const finalizeInviteAcceptanceFn = createServerFn({ method: 'POST' })
   .validator((data: { memberId: string; invitationId: string }) => data)
   .handler(({ data }) =>
@@ -133,8 +133,8 @@ export const finalizeInviteAcceptanceFn = createServerFn({ method: 'POST' })
       Effect.gen(function* () {
         const auth = yield* AuthService
         const members = yield* Members
-        yield* auth.requireSession(headers())
-        yield* members.finalizeAcceptance(data.memberId, data.invitationId)
+        const session = yield* auth.requireSession(headers())
+        yield* members.finalizeAcceptance(session.user.id, data.memberId, data.invitationId)
       }),
     ),
   )

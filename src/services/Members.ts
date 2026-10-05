@@ -1,10 +1,11 @@
 import { Context, Effect, Layer } from 'effect'
-import { eq, and, or, ilike, count } from 'drizzle-orm'
+import { eq, and, or, ilike, count, inArray } from 'drizzle-orm'
 import { Database } from './Database'
 import { member, user, invitation, invitationGroup, memberGroup, group } from '../db/schema'
 import { auth } from '../lib/auth'
-import { ValidationError } from '../domain/errors'
+import { ForbiddenError, NotFoundError, ValidationError } from '../domain/errors'
 import { PAGE_SIZE, type Page } from '../domain/pagination'
+import { requireOrgGroups } from './orgGroups'
 
 export type InviteRole = 'admin' | 'member'
 
@@ -34,7 +35,7 @@ export class Members extends Context.Tag('Members')<
         role: InviteRole
         groupIds: Array<string>
       },
-    ) => Effect.Effect<{ id: string }, ValidationError>
+    ) => Effect.Effect<{ id: string }, ValidationError | NotFoundError>
     readonly revokeInvite: (headers: Headers, invitationId: string) => Effect.Effect<void, ValidationError>
     readonly updateMemberRole: (
       headers: Headers,
@@ -43,14 +44,25 @@ export class Members extends Context.Tag('Members')<
       memberId: string,
       role: InviteRole,
     ) => Effect.Effect<void, ValidationError>
-    readonly updateMemberGroups: (memberId: string, groupIds: Array<string>) => Effect.Effect<void>
+    readonly updateMemberGroups: (
+      orgId: string,
+      memberId: string,
+      groupIds: Array<string>,
+    ) => Effect.Effect<void, NotFoundError>
     readonly removeMember: (
       headers: Headers,
       orgId: string,
       memberId: string,
     ) => Effect.Effect<void, ValidationError>
-    /** Copies group grants from an accepted invitation onto the resulting member row. */
-    readonly finalizeAcceptance: (memberId: string, invitationId: string) => Effect.Effect<void>
+    /**
+     * Copies group grants from an accepted invitation onto the resulting member row.
+     * The member must be the caller's own, in the invitation's organization.
+     */
+    readonly finalizeAcceptance: (
+      userId: string,
+      memberId: string,
+      invitationId: string,
+    ) => Effect.Effect<void, ForbiddenError>
     /**
      * Deletes the organization row. Every domain table (song, playlist, group, asset, …)
      * references organization.id with ON DELETE CASCADE, so this wipes all choir data —
@@ -93,6 +105,7 @@ export const MembersLive = Layer.effect(
                   .select({ memberId: memberGroup.memberId, group })
                   .from(memberGroup)
                   .innerJoin(group, eq(group.id, memberGroup.groupId))
+                  .where(inArray(memberGroup.memberId, memberIds))
               : []
           return {
             rows: rows.map((r) => ({
@@ -135,6 +148,7 @@ export const MembersLive = Layer.effect(
                   .select({ invitationId: invitationGroup.invitationId, group })
                   .from(invitationGroup)
                   .innerJoin(group, eq(group.id, invitationGroup.groupId))
+                  .where(inArray(invitationGroup.invitationId, invitationIds))
               : []
           return {
             rows: rows.map((row) => ({
@@ -149,7 +163,9 @@ export const MembersLive = Layer.effect(
       },
 
       createInvite: (headers, orgId, input) =>
-        Effect.tryPromise({
+        requireOrgGroups(db, orgId, input.groupIds).pipe(
+          Effect.flatMap((groupIds) =>
+            Effect.tryPromise({
           try: () =>
             auth.api.createInvitation({
               headers,
@@ -162,15 +178,17 @@ export const MembersLive = Layer.effect(
               },
             }),
           catch: (cause) => new ValidationError({ message: (cause as Error).message ?? 'Invitation impossible' }),
-        }).pipe(
-          Effect.tap((created) =>
-            input.groupIds.length > 0
-              ? Effect.promise(() =>
-                  db
-                    .insert(invitationGroup)
-                    .values(input.groupIds.map((groupId) => ({ invitationId: created.id, groupId }))),
-                )
-              : Effect.void,
+            }).pipe(
+              Effect.tap((created) =>
+                groupIds.length > 0
+                  ? Effect.promise(() =>
+                      db
+                        .insert(invitationGroup)
+                        .values(groupIds.map((groupId) => ({ invitationId: created.id, groupId }))),
+                    )
+                  : Effect.void,
+              ),
+            ),
           ),
           Effect.map((created) => ({ id: created.id })),
         ),
@@ -200,13 +218,28 @@ export const MembersLive = Layer.effect(
           Effect.asVoid,
         ),
 
-      updateMemberGroups: (memberId, groupIds) =>
-        Effect.promise(async () => {
-          await db.delete(memberGroup).where(eq(memberGroup.memberId, memberId))
-          if (groupIds.length > 0) {
-            await db.insert(memberGroup).values(groupIds.map((groupId) => ({ memberId, groupId })))
-          }
-        }).pipe(Effect.asVoid),
+      updateMemberGroups: (orgId, memberId, groupIds) =>
+        Effect.promise(() =>
+          db
+            .select({ id: member.id })
+            .from(member)
+            .where(and(eq(member.id, memberId), eq(member.organizationId, orgId)))
+            .limit(1),
+        ).pipe(
+          Effect.flatMap(([row]) =>
+            row ? Effect.void : Effect.fail(new NotFoundError({ entity: 'member', id: memberId })),
+          ),
+          Effect.flatMap(() => requireOrgGroups(db, orgId, groupIds)),
+          Effect.flatMap((ids) =>
+            Effect.promise(async () => {
+              await db.delete(memberGroup).where(eq(memberGroup.memberId, memberId))
+              if (ids.length > 0) {
+                await db.insert(memberGroup).values(ids.map((groupId) => ({ memberId, groupId })))
+              }
+            }),
+          ),
+          Effect.asVoid,
+        ),
 
       removeMember: (headers, orgId, memberId) =>
         Effect.tryPromise({
@@ -215,18 +248,43 @@ export const MembersLive = Layer.effect(
           catch: (cause) => new ValidationError({ message: (cause as Error).message ?? 'Suppression impossible' }),
         }).pipe(Effect.asVoid),
 
-      finalizeAcceptance: (memberId, invitationId) =>
-        Effect.promise(async () => {
-          const groupIds = (
-            await db
-              .select({ groupId: invitationGroup.groupId })
-              .from(invitationGroup)
-              .where(eq(invitationGroup.invitationId, invitationId))
-          ).map((r) => r.groupId)
-          if (groupIds.length > 0) {
-            await db.insert(memberGroup).values(groupIds.map((groupId) => ({ memberId, groupId })))
-          }
-        }).pipe(Effect.asVoid),
+      finalizeAcceptance: (userId, memberId, invitationId) =>
+        Effect.promise(() =>
+          db
+            .select({ id: member.id })
+            .from(member)
+            .innerJoin(invitation, eq(invitation.organizationId, member.organizationId))
+            .where(
+              and(
+                eq(member.id, memberId),
+                eq(member.userId, userId),
+                eq(invitation.id, invitationId),
+                eq(invitation.status, 'accepted'),
+              ),
+            )
+            .limit(1),
+        ).pipe(
+          Effect.flatMap(([row]) =>
+            row ? Effect.void : Effect.fail(new ForbiddenError({ reason: 'invitation-not-accepted-by-caller' })),
+          ),
+          Effect.flatMap(() =>
+            Effect.promise(async () => {
+              const groupIds = (
+                await db
+                  .select({ groupId: invitationGroup.groupId })
+                  .from(invitationGroup)
+                  .where(eq(invitationGroup.invitationId, invitationId))
+              ).map((r) => r.groupId)
+              if (groupIds.length > 0) {
+                await db
+                  .insert(memberGroup)
+                  .values(groupIds.map((groupId) => ({ memberId, groupId })))
+                  .onConflictDoNothing()
+              }
+            }),
+          ),
+          Effect.asVoid,
+        ),
 
       deleteOrganization: (headers, orgId) =>
         Effect.tryPromise({

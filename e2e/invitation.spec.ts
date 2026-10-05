@@ -3,13 +3,22 @@ import { director } from './env'
 import { gotoHydrated, openCreateDialog } from './helpers'
 
 test('an invited singer creates an account, joins the choir with read-only access', async ({ page, browser }) => {
-  const email = `choriste-${Date.now().toString(36)}@e2e.test`
+  const run = Date.now().toString(36)
+  const email = `choriste-${run}@e2e.test`
+  const voice = `Alto ${run}`
+
+  await gotoHydrated(page, '/groups')
+  const groupDialog = await openCreateDialog(page, 'Nouveau groupe')
+  await groupDialog.getByLabel('Nom').fill(voice)
+  await groupDialog.getByRole('button', { name: 'Créer' }).click()
+  await expect(groupDialog).toBeHidden()
 
   await gotoHydrated(page, '/members')
   const dialog = await openCreateDialog(page, "Inviter quelqu'un")
   await dialog.getByLabel('Prénom').fill('Jeanne')
   await dialog.getByLabel('Email').fill(email)
   await dialog.getByLabel('Rôle').selectOption('member')
+  await dialog.getByLabel(voice).check()
   await dialog.getByRole('button', { name: "Générer le lien d'invitation" }).click()
   const link = (await dialog.locator('code').textContent())!.trim()
   expect(link).toContain('/accept-invite/')
@@ -35,7 +44,9 @@ test('an invited singer creates an account, joins the choir with read-only acces
   await expect(pub.getByRole('button', { name: 'Nouveau chant' })).toHaveCount(0)
   await singer.close()
 
-  // The director now sees the new member instead of a pending invitation.
+  // The director now sees the new member, with the voice granted by the invitation.
   await page.reload()
-  await expect(page.getByText(email).first()).toBeVisible()
+  const memberRow = page.getByRole('row').filter({ hasText: email })
+  await expect(memberRow).toBeVisible()
+  await expect(memberRow.getByText(voice)).toBeVisible()
 })

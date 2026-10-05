@@ -34,6 +34,8 @@ describe('Songs', () => {
       Effect.flatMap(songs, (s) => s.update(org.id, created.id, { ...input, title: 'Ave', composer: null })),
     )
     expect(updated).toMatchObject({ title: 'Ave', composer: null })
+    // timestamptz: DB defaults and JS dates agree whatever the session time zone.
+    expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(created.updatedAt.getTime())
 
     await run(Effect.flatMap(songs, (s) => s.remove(org.id, created.id)))
     const err = await fail(Effect.flatMap(songs, (s) => s.get(org.id, created.id)))

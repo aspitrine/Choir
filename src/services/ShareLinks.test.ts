@@ -126,4 +126,23 @@ describe('ShareLinks', () => {
     expect(await fail(Effect.flatMap(ShareLinks, (s) => s.revoke(other.id, link.id)))).toBeInstanceOf(NotFoundError)
     await resolve(link.token)
   })
+
+  it('refuses a link filtered on a group of another organization', async () => {
+    const { org, playlist } = await choir()
+    const foreign = await seedGroup(t.db, (await seedOrg(t.db, 'Other')).id, 'Theirs')
+    const err = await fail(Effect.flatMap(ShareLinks, (s) => s.create(org.id, playlist.id, [foreign.id])))
+    expect(err).toBeInstanceOf(NotFoundError)
+    expect(await run(Effect.flatMap(ShareLinks, (s) => s.list(org.id, playlist.id)))).toEqual([])
+  })
+
+  it('lists links with their own groups only', async () => {
+    const { org, playlist, groups } = await choir()
+    const a = await create(org.id, playlist.id, [groups.basse.id])
+    const b = await create(org.id, playlist.id, [groups.alto.id, groups.soprano.id])
+    const links = await run(Effect.flatMap(ShareLinks, (s) => s.list(org.id, playlist.id)))
+    const byId = new Map(links.map((l) => [l.link.id, l.groups.map((g) => g.name).sort()]))
+    expect(byId.get(a.id)).toEqual(['Basse'])
+    expect(byId.get(b.id)).toEqual(['Alto', 'Soprano'])
+  })
 })
+

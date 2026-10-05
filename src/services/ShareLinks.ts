@@ -12,6 +12,7 @@ import {
   assetGroup,
 } from '../db/schema'
 import { NotFoundError } from '../domain/errors'
+import { requireOrgGroups } from './orgGroups'
 
 export class ShareLinks extends Context.Tag('ShareLinks')<
   ShareLinks,
@@ -56,10 +57,15 @@ export const ShareLinksLive = Layer.effect(
             .from(shareLink)
             .innerJoin(playlist, eq(playlist.id, shareLink.playlistId))
             .where(and(eq(shareLink.playlistId, playlistId), eq(playlist.organizationId, orgId)))
-          const groupRows = await db
-            .select({ shareLinkId: shareLinkGroup.shareLinkId, group })
-            .from(shareLinkGroup)
-            .innerJoin(group, eq(group.id, shareLinkGroup.groupId))
+          const linkIds = links.map(({ link }) => link.id)
+          const groupRows =
+            linkIds.length > 0
+              ? await db
+                  .select({ shareLinkId: shareLinkGroup.shareLinkId, group })
+                  .from(shareLinkGroup)
+                  .innerJoin(group, eq(group.id, shareLinkGroup.groupId))
+                  .where(inArray(shareLinkGroup.shareLinkId, linkIds))
+              : []
           return links.map(({ link }) => ({
             link,
             groups: groupRows.filter((g) => g.shareLinkId === link.id).map((g) => g.group),
@@ -77,16 +83,17 @@ export const ShareLinksLive = Layer.effect(
           Effect.flatMap(([row]) =>
             row ? Effect.succeed(row) : Effect.fail(new NotFoundError({ entity: 'playlist', id: playlistId })),
           ),
-          Effect.flatMap(() =>
+          Effect.flatMap(() => requireOrgGroups(db, orgId, groupIds)),
+          Effect.flatMap((ids) =>
             Effect.promise(async () => {
               const [created] = await db
                 .insert(shareLink)
                 .values({ id: crypto.randomUUID(), playlistId, token: crypto.randomUUID() })
                 .returning()
-              if (groupIds.length > 0) {
+              if (ids.length > 0) {
                 await db
                   .insert(shareLinkGroup)
-                  .values(groupIds.map((groupId) => ({ shareLinkId: created!.id, groupId })))
+                  .values(ids.map((groupId) => ({ shareLinkId: created!.id, groupId })))
               }
               return created!
             }),
@@ -143,21 +150,25 @@ export const ShareLinksLive = Layer.effect(
                   : []
 
               let visibleAssetIds: Set<string>
-              if (filterGroupIds.length === 0) {
+              if (filterGroupIds.length === 0 || allAssets.length === 0) {
                 visibleAssetIds = new Set(allAssets.map((a) => a.id))
               } else {
-                const taggedAssetIds = new Set(
-                  (
-                    await db
-                      .select({ assetId: assetGroup.assetId })
-                      .from(assetGroup)
-                      .where(inArray(assetGroup.groupId, filterGroupIds))
-                  ).map((r) => r.assetId),
-                )
-                const anyTagRows = await db
-                  .select({ assetId: assetGroup.assetId })
+                // Tags of this playlist's assets only: an asset is visible when
+                // untagged or tagged with one of the link's groups.
+                const tagRows = await db
+                  .select({ assetId: assetGroup.assetId, groupId: assetGroup.groupId })
                   .from(assetGroup)
-                const anyTaggedAssetIds = new Set(anyTagRows.map((r) => r.assetId))
+                  .where(
+                    inArray(
+                      assetGroup.assetId,
+                      allAssets.map((a) => a.id),
+                    ),
+                  )
+                const anyTaggedAssetIds = new Set(tagRows.map((r) => r.assetId))
+                const filter = new Set(filterGroupIds)
+                const taggedAssetIds = new Set(
+                  tagRows.filter((r) => filter.has(r.groupId)).map((r) => r.assetId),
+                )
                 visibleAssetIds = new Set(
                   allAssets
                     .filter((a) => !anyTaggedAssetIds.has(a.id) || taggedAssetIds.has(a.id))
