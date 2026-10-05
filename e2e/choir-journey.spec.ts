@@ -90,6 +90,38 @@ test('director builds a playlist and shares it', async ({ page }) => {
   await expect(shareLinkBlocks(page)).toHaveCount(2)
 })
 
+test('director reorders songs and the order survives a reload', async ({ page }) => {
+  const second = `Kyrie ${run}`
+  await gotoHydrated(page, '/songs')
+  const dialog = await openCreateDialog(page, 'Nouveau chant')
+  await dialog.getByLabel('Titre').fill(second)
+  await dialog.getByRole('button', { name: 'Créer' }).click()
+  await expect(dialog).toBeHidden()
+
+  await gotoHydrated(page, playlistUrl)
+  await page.getByRole('button', { name: 'Ajouter un chant' }).click()
+  const addDialog = page.getByRole('dialog', { name: 'Ajouter un chant' })
+  await addDialog.getByPlaceholder('Rechercher un titre ou compositeur…').fill(second)
+  await addDialog.getByRole('cell', { name: second }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByText('2 chant(s)')).toBeVisible()
+
+  const titles = page.locator('[aria-roledescription="sortable"]').locator('xpath=../div/div[1]')
+  await expect(titles).toHaveText([songTitle, second])
+
+  // dnd-kit keyboard sensor: pick up the second row, move it up, drop it.
+  // It measures layout between frames, hence the short pauses.
+  await page.getByRole('button', { name: 'Réordonner' }).nth(1).focus()
+  for (const key of ['Space', 'ArrowUp', 'Space']) {
+    await page.keyboard.press(key)
+    await page.waitForTimeout(150)
+  }
+  await expect(titles).toHaveText([second, songTitle])
+
+  await page.reload()
+  await expect(titles).toHaveText([second, songTitle])
+})
+
 test('singers get per-voice looping playlists and merged scores', async ({ page, browser }) => {
   await gotoHydrated(page, playlistUrl)
   const url = await shareLinkUrl(page, 'Tout le monde')

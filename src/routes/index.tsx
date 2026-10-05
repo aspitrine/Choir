@@ -1,15 +1,16 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useState, type FormEvent } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authClient, signIn } from '@/lib/auth-client'
-import { getSessionFn } from '../server/auth'
+import { sessionQueries } from '@/queries/session'
 
 export const Route = createFileRoute('/')({
-  beforeLoad: async () => {
-    const session = await getSessionFn()
+  beforeLoad: async ({ context: { queryClient } }) => {
+    const session = await queryClient.fetchQuery(sessionQueries.current())
     if (session) {
       throw redirect({ to: '/dashboard' })
     }
@@ -21,20 +22,18 @@ function Home() {
   const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const signInWithPassword = useMutation({
+    mutationFn: async () => {
+      const { error } = await authClient.signIn.email({ email, password, callbackURL: '/dashboard' })
+      if (error) throw new Error(error.message ?? 'Identifiants incorrects')
+    },
+    // Full load: the app starts with the new session and an empty query cache.
+    onSuccess: () => window.location.assign('/dashboard'),
+  })
 
-  async function handlePasswordSignIn(e: FormEvent) {
+  function handlePasswordSignIn(e: FormEvent) {
     e.preventDefault()
-    setError(null)
-    setSubmitting(true)
-    const { error: signInError } = await authClient.signIn.email({ email, password, callbackURL: '/dashboard' })
-    setSubmitting(false)
-    if (signInError) {
-      setError(signInError.message ?? 'Identifiants incorrects')
-      return
-    }
-    window.location.assign('/dashboard')
+    signInWithPassword.mutate()
   }
 
   return (
@@ -92,9 +91,15 @@ function Home() {
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
-              {error ? <p className="text-sm text-destructive">{error}</p> : null}
-              <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? 'Connexion…' : 'Se connecter'}
+              {signInWithPassword.isError ? (
+                <p className="text-sm text-destructive">{signInWithPassword.error.message}</p>
+              ) : null}
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={signInWithPassword.isPending || signInWithPassword.isSuccess}
+              >
+                {signInWithPassword.isPending || signInWithPassword.isSuccess ? 'Connexion…' : 'Se connecter'}
               </Button>
             </form>
           )}

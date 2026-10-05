@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { useQueryErrorResetBoundary } from '@tanstack/react-query'
 import { Link, useRouter } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,6 +22,10 @@ function Fallback({ title, description, children }: { title: string; description
 // details stay out of the UI: they can carry internal messages.
 export function RouteError() {
   const router = useRouter()
+  const queryErrorResetBoundary = useQueryErrorResetBoundary()
+  // Failed suspense queries stay in error until reset; otherwise a retry would
+  // render the same error again without refetching.
+  useEffect(() => queryErrorResetBoundary.reset(), [queryErrorResetBoundary])
   return (
     <Fallback title="Une erreur est survenue" description="Cette page n'a pas pu être chargée.">
       <Button onClick={() => router.invalidate()}>Réessayer</Button>

@@ -1,20 +1,23 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, notFound } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PdfViewer } from '@/components/pdf-viewer'
 import { AudioPlayer } from '@/components/audio-player'
 import { SharedBundles } from '@/components/shared-bundles'
-import { getPublicPlaylistFn } from '@/server/shareLinks'
+import { useSuspenseQuery } from '@tanstack/react-query'
+import { publicQueries } from '@/queries/public'
 
 export const Route = createFileRoute('/s/$token')({
-  loader: async ({ params }) => {
+  // Returned (not only cached) so `head` can build the link preview from it.
+  loader: async ({ params, context: { queryClient } }) => {
     try {
-      return await getPublicPlaylistFn({ data: { token: params.token } })
+      return await queryClient.ensureQueryData(publicQueries.playlist(params.token))
     } catch {
-      return null
+      throw notFound()
     }
   },
+  notFoundComponent: LinkNotFound,
   head: ({ loaderData }) => {
     if (!loaderData) {
       return { meta: [{ title: 'Lien introuvable · Chorale' }] }
@@ -46,26 +49,27 @@ export const Route = createFileRoute('/s/$token')({
   component: PublicPlaylistPage,
 })
 
-type PlaylistItem = NonNullable<ReturnType<typeof Route.useLoaderData>>['items'][number]
+type PlaylistItem = ReturnType<typeof Route.useLoaderData>['items'][number]
 type PlaylistAsset = PlaylistItem['assets'][number]
 
-function PublicPlaylistPage() {
-  const data = Route.useLoaderData()
-  const { token } = Route.useParams()
-  const [selected, setSelected] = useState<PlaylistItem | null>(null)
+function LinkNotFound() {
+  return (
+    <div className="flex min-h-screen items-center justify-center p-8">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle>Lien introuvable</CardTitle>
+          <CardDescription>Ce lien a expiré ou a été révoqué.</CardDescription>
+        </CardHeader>
+      </Card>
+    </div>
+  )
+}
 
-  if (!data) {
-    return (
-      <div className="flex min-h-screen items-center justify-center p-8">
-        <Card className="w-full max-w-sm">
-          <CardHeader>
-            <CardTitle>Lien introuvable</CardTitle>
-            <CardDescription>Ce lien a expiré ou a été révoqué.</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    )
-  }
+function PublicPlaylistPage() {
+  const { token } = Route.useParams()
+  // Subscribed: refetched once stale, which renews the presigned file URLs.
+  const { data } = useSuspenseQuery(publicQueries.playlist(token))
+  const [selected, setSelected] = useState<PlaylistItem | null>(null)
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-8">

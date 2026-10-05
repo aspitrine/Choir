@@ -1,5 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { sessionKeys } from '@/queries/session'
 import { Schema } from 'effect'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -55,43 +57,33 @@ function AcceptInvitePage() {
   const navigate = useNavigate()
   const { data: session, isPending: sessionPending } = useSession()
 
-  const [invitation, setInvitation] = useState<InvitationInfo | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [accepting, setAccepting] = useState(false)
-  const [acceptError, setAcceptError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   const callbackURL = typeof window !== 'undefined' ? window.location.href : undefined
   const emailMismatch =
     !!session && !!invitedEmail && session.user.email.toLowerCase() !== invitedEmail.toLowerCase()
 
-  useEffect(() => {
-    if (!session || emailMismatch) return
-    let cancelled = false
-    authClient.organization.getInvitation({ query: { id: invitationId } }).then(({ data, error }) => {
-      if (cancelled) return
-      if (error || !data) {
-        setLoadError("Cette invitation n'est plus valide (expirée, révoquée ou déjà acceptée).")
-        return
-      }
-      setInvitation({ organizationName: data.organizationName, role: data.role })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [session, emailMismatch, invitationId])
+  // Better Auth only shows an invitation to its recipient: wait for the right session.
+  const invitationQuery = useQuery({
+    queryKey: ['invitation', invitationId],
+    queryFn: async (): Promise<InvitationInfo> => {
+      const { data, error } = await authClient.organization.getInvitation({ query: { id: invitationId } })
+      if (error || !data) throw new Error(error?.message ?? 'Invitation introuvable')
+      return { organizationName: data.organizationName, role: data.role }
+    },
+    enabled: !!session && !emailMismatch,
+    retry: false,
+  })
+  const invitation = invitationQuery.data
 
-  async function handleAccept() {
-    setAccepting(true)
-    setAcceptError(null)
-    try {
-      await acceptInvitationFn({ data: { invitationId, secret: secret ?? '' } })
-    } catch {
-      setAcceptError("Impossible d'accepter l'invitation. Vérifiez que vous utilisez le lien complet reçu.")
-      setAccepting(false)
-      return
-    }
-    navigate({ to: '/dashboard' })
-  }
+  const accept = useMutation({
+    mutationFn: () => acceptInvitationFn({ data: { invitationId, secret: secret ?? '' } }),
+    onSuccess: async () => {
+      // The session now has an active choir and a role: drop anything cached before.
+      queryClient.removeQueries({ queryKey: sessionKeys.all })
+      await navigate({ to: '/dashboard' })
+    },
+  })
 
   return (
     <div className="flex min-h-screen items-center justify-center p-8">
@@ -116,8 +108,10 @@ function AcceptInvitePage() {
                 Se déconnecter
               </Button>
             </div>
-          ) : loadError ? (
-            <p className="text-sm text-destructive">{loadError}</p>
+          ) : invitationQuery.isError ? (
+            <p className="text-sm text-destructive">
+              Cette invitation n'est plus valide (expirée, révoquée ou déjà acceptée).
+            </p>
           ) : !invitation ? (
             <p className="text-sm text-muted-foreground">Chargement…</p>
           ) : (
@@ -126,9 +120,13 @@ function AcceptInvitePage() {
                 Rejoindre <span className="font-medium">{invitation.organizationName}</span> en tant que{' '}
                 <span className="font-medium">{roleLabel(invitation.role)}</span>.
               </p>
-              {acceptError ? <p className="text-sm text-destructive">{acceptError}</p> : null}
-              <Button className="w-full" disabled={accepting} onClick={handleAccept}>
-                {accepting ? 'Acceptation…' : 'Accepter'}
+              {accept.isError ? (
+                <p className="text-sm text-destructive">
+                  Impossible d'accepter l'invitation. Vérifiez que vous utilisez le lien complet reçu.
+                </p>
+              ) : null}
+              <Button className="w-full" disabled={accept.isPending || accept.isSuccess} onClick={() => accept.mutate()}>
+                {accept.isPending || accept.isSuccess ? 'Acceptation…' : 'Accepter'}
               </Button>
             </div>
           )}
@@ -142,26 +140,18 @@ function SignInOptions({ invitedEmail, callbackURL }: { invitedEmail?: string; c
   const [showPasswordForm, setShowPasswordForm] = useState(false)
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const signUp = useMutation({
+    mutationFn: async (email: string) => {
+      const { error } = await authClient.signUp.email({ name, email, password, callbackURL })
+      if (error) throw new Error(error.message ?? 'Impossible de créer le compte')
+    },
+    // Fresh page load with the new session cookie.
+    onSuccess: () => window.location.reload(),
+  })
 
-  async function handlePasswordSignUp(e: FormEvent) {
+  function handlePasswordSignUp(e: FormEvent) {
     e.preventDefault()
-    if (!invitedEmail) return
-    setError(null)
-    setSubmitting(true)
-    const { error: signUpError } = await authClient.signUp.email({
-      name,
-      email: invitedEmail,
-      password,
-      callbackURL,
-    })
-    setSubmitting(false)
-    if (signUpError) {
-      setError(signUpError.message ?? 'Impossible de créer le compte')
-      return
-    }
-    window.location.reload()
+    if (invitedEmail) signUp.mutate(invitedEmail)
   }
 
   return (
@@ -206,9 +196,9 @@ function SignInOptions({ invitedEmail, callbackURL }: { invitedEmail?: string; c
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <Button type="submit" className="w-full" disabled={submitting}>
-            {submitting ? 'Création…' : 'Créer mon compte'}
+          {signUp.isError ? <p className="text-sm text-destructive">{signUp.error.message}</p> : null}
+          <Button type="submit" className="w-full" disabled={signUp.isPending || signUp.isSuccess}>
+            {signUp.isPending || signUp.isSuccess ? 'Création…' : 'Créer mon compte'}
           </Button>
         </form>
       )}

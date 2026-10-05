@@ -1,4 +1,5 @@
-import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
+import { useMutation, useSuspenseQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { Schema } from 'effect'
 import { Button } from '@/components/ui/button'
@@ -16,10 +17,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { TablePager } from '@/components/table-pager'
 import { useAppForm } from '@/lib/form'
 import { CreateGroupForm } from '@/domain/groups'
-import { searchGroupsFn, createGroupFn, deleteGroupFn } from '@/server/groups'
-import { getMyRoleFn } from '@/server/members'
+import { createGroupFn, deleteGroupFn } from '@/server/groups'
+import { groupKeys, groupQueries } from '@/queries/groups'
+import { songKeys } from '@/queries/songs'
+import { playlistKeys } from '@/queries/playlists'
+import { memberKeys } from '@/queries/members'
+import { useIsManager } from '@/queries/session'
 import { useConfirm } from '@/components/confirm-dialog'
-import { attempt } from '@/lib/attempt'
 
 const GroupsSearch = Schema.Struct({
   q: Schema.optional(Schema.String),
@@ -29,24 +33,24 @@ const GroupsSearch = Schema.Struct({
 export const Route = createFileRoute('/_authed/groups/')({
   validateSearch: (search) => Schema.decodeUnknownSync(GroupsSearch)(search),
   loaderDeps: ({ search }) => ({ q: search.q ?? '', page: search.page ?? 1 }),
-  loader: async ({ deps }) => {
-    try {
-      const [page, role] = await Promise.all([searchGroupsFn({ data: deps }), getMyRoleFn()])
-      return { ...page, role }
-    } catch {
-      throw redirect({ to: '/songs' })
-    }
-  },
+  loader: ({ deps, context: { queryClient } }) => queryClient.ensureQueryData(groupQueries.search(deps)),
   component: GroupsPage,
 })
 
 function GroupsPage() {
-  const { rows: groups, total, page, pageSize, role } = Route.useLoaderData()
-  const isManager = role === 'owner' || role === 'admin'
+  const deps = Route.useLoaderDeps()
+  const {
+    data: { rows: groups, total, page, pageSize },
+  } = useSuspenseQuery(groupQueries.search(deps))
+  const isManager = useIsManager()
   const { q } = Route.useSearch()
   const navigate = Route.useNavigate()
-  const router = useRouter()
   const confirm = useConfirm()
+  const deleteGroup = useMutation({
+    mutationFn: (groupId: string) => deleteGroupFn({ data: { groupId } }),
+    // Group names appear on files, share links and members.
+    meta: { errorMessage: 'Suppression impossible', invalidates: [groupKeys.all, songKeys.all, playlistKeys.all, memberKeys.all] },
+  })
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const [open, setOpen] = useState(false)
 
@@ -81,12 +85,7 @@ function GroupsPage() {
                 <DialogTitle>Nouveau groupe</DialogTitle>
                 <DialogDescription>Ex: Sopranos, Chorale enfants, Bureau…</DialogDescription>
               </DialogHeader>
-              <CreateGroupDialogForm
-                onCreated={async () => {
-                  setOpen(false)
-                  await router.invalidate()
-                }}
-              />
+              <CreateGroupDialogForm onCreated={() => setOpen(false)} />
             </DialogContent>
           </Dialog>
         ) : null}
@@ -125,9 +124,7 @@ function GroupsPage() {
                             confirmLabel: 'Supprimer',
                           })
                           if (!ok) return
-                          if (!(await attempt(() => deleteGroupFn({ data: { groupId: grp.id } }), 'Suppression impossible')))
-                            return
-                          await router.invalidate()
+                          deleteGroup.mutate(grp.id)
                         }}
                       >
                         Supprimer
@@ -158,20 +155,22 @@ function GroupsPage() {
 }
 
 function CreateGroupDialogForm({ onCreated }: { onCreated: () => void }) {
-  const [serverError, setServerError] = useState<string | null>(null)
+  const createGroup = useMutation({
+    mutationFn: (name: string) => createGroupFn({ data: { name } }),
+    meta: { invalidates: [groupKeys.all] },
+  })
 
   const form = useAppForm({
     defaultValues: { name: '' },
     validators: { onChange: CreateGroupForm },
     onSubmit: async ({ value, formApi }) => {
-      setServerError(null)
       try {
-        await createGroupFn({ data: { name: value.name } })
-        formApi.reset()
-        onCreated()
+        await createGroup.mutateAsync(value.name)
       } catch {
-        setServerError('Impossible de créer le groupe')
+        return // shown inline below
       }
+      formApi.reset()
+      onCreated()
     },
   })
 
@@ -187,7 +186,7 @@ function CreateGroupDialogForm({ onCreated }: { onCreated: () => void }) {
         name="name"
         children={(field) => <field.TextField label="Nom" placeholder="Sopranos" autoFocus />}
       />
-      {serverError ? <p className="text-sm text-destructive">{serverError}</p> : null}
+      {createGroup.isError ? <p className="text-sm text-destructive">Impossible de créer le groupe</p> : null}
       <form.AppForm>
         <form.SubmitButton label="Créer" pendingLabel="Création…" />
       </form.AppForm>

@@ -1,4 +1,5 @@
-import { createFileRoute, Link, redirect, useRouter } from '@tanstack/react-router'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { useEffect, useId, useState } from 'react'
 import {
   DndContext,
@@ -34,7 +35,6 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { TablePager } from '@/components/table-pager'
 import {
-  getPlaylistFn,
   deletePlaylistFn,
   addSongToPlaylistFn,
   removePlaylistItemFn,
@@ -42,28 +42,28 @@ import {
   addEventDateFn,
   removeEventDateFn,
 } from '@/server/playlists'
-import { listShareLinksFn, createShareLinkFn, revokeShareLinkFn } from '@/server/shareLinks'
-import { listSongsFn, updateSongFn, getSongFn } from '@/server/songs'
-import { listGroupsFn } from '@/server/groups'
-import { getMyRoleFn } from '@/server/members'
+import { createShareLinkFn, revokeShareLinkFn } from '@/server/shareLinks'
+import { updateSongFn } from '@/server/songs'
+import { playlistKeys, playlistQueries } from '@/queries/playlists'
+import { songKeys, songQueries } from '@/queries/songs'
+import { groupQueries } from '@/queries/groups'
+import { useIsManager } from '@/queries/session'
 import { useConfirm } from '@/components/confirm-dialog'
 import { useAppForm } from '@/lib/form'
-import { CreateSongForm } from '@/domain/songs'
+import { CreateSongForm, type UpdateSongInput } from '@/domain/songs'
 import { PdfViewer } from '@/components/pdf-viewer'
 import { AudioPlayer } from '@/components/audio-player'
-import { attempt } from '@/lib/attempt'
 import { formatEventDate } from '@/lib/dates'
+import { useSearchPaging } from '@/hooks/use-search-paging'
 
 export const Route = createFileRoute('/_authed/playlists/$playlistId')({
-  loader: async ({ params }) => {
+  loader: async ({ params: { playlistId }, context: { queryClient } }) => {
     try {
-      const [data, shareLinks, allGroups, role] = await Promise.all([
-        getPlaylistFn({ data: { playlistId: params.playlistId } }),
-        listShareLinksFn({ data: { playlistId: params.playlistId } }),
-        listGroupsFn(),
-        getMyRoleFn(),
+      await Promise.all([
+        queryClient.ensureQueryData(playlistQueries.detail(playlistId)),
+        queryClient.ensureQueryData(playlistQueries.shareLinks(playlistId)),
+        queryClient.ensureQueryData(groupQueries.options()),
       ])
-      return { ...data, shareLinks, allGroups, role }
     } catch {
       throw redirect({ to: '/playlists' })
     }
@@ -72,11 +72,25 @@ export const Route = createFileRoute('/_authed/playlists/$playlistId')({
 })
 
 function PlaylistDetailPage() {
-  const { playlist, items, shareLinks, allGroups, eventDates, role } = Route.useLoaderData()
-  const isManager = role === 'owner' || role === 'admin'
-  const router = useRouter()
+  const { playlistId } = Route.useParams()
+  const {
+    data: { playlist, items, eventDates },
+  } = useSuspenseQuery(playlistQueries.detail(playlistId))
+  const { data: shareLinks } = useSuspenseQuery(playlistQueries.shareLinks(playlistId))
+  const { data: allGroups } = useSuspenseQuery(groupQueries.options())
+  const isManager = useIsManager()
   const navigate = Route.useNavigate()
   const confirm = useConfirm()
+  const queryClient = useQueryClient()
+  const deletePlaylist = useMutation({
+    mutationFn: () => deletePlaylistFn({ data: { playlistId } }),
+    meta: { errorMessage: 'Suppression impossible' },
+    onSuccess: async () => {
+      await navigate({ to: '/playlists' })
+      queryClient.removeQueries({ queryKey: playlistKeys.detail(playlistId) })
+      await queryClient.invalidateQueries({ queryKey: playlistKeys.all })
+    },
+  })
 
   const songIdsInPlaylist = new Set(items.map((i) => i.song.id))
 
@@ -103,11 +117,7 @@ function PlaylistDetailPage() {
                   confirmLabel: 'Supprimer',
                 })
                 if (!ok) return
-                if (
-                  !(await attempt(() => deletePlaylistFn({ data: { playlistId: playlist.id } }), 'Suppression impossible'))
-                )
-                  return
-                navigate({ to: '/playlists' })
+                deletePlaylist.mutate()
               }}
             >
               Supprimer
@@ -116,28 +126,11 @@ function PlaylistDetailPage() {
         </div>
       </header>
 
-      <EventDatesCard
-        playlistId={playlist.id}
-        eventDates={eventDates}
-        isManager={isManager}
-        onChanged={() => router.invalidate()}
-      />
+      <EventDatesCard playlistId={playlist.id} eventDates={eventDates} isManager={isManager} />
 
-      <SongList
-        playlistId={playlist.id}
-        items={items}
-        excludeSongIds={songIdsInPlaylist}
-        isManager={isManager}
-        onChanged={() => router.invalidate()}
-      />
+      <SongList playlistId={playlist.id} items={items} excludeSongIds={songIdsInPlaylist} isManager={isManager} />
 
-      <ShareLinksCard
-        playlistId={playlist.id}
-        shareLinks={shareLinks}
-        allGroups={allGroups}
-        isManager={isManager}
-        onChanged={() => router.invalidate()}
-      />
+      <ShareLinksCard playlistId={playlist.id} shareLinks={shareLinks} allGroups={allGroups} isManager={isManager} />
     </div>
   )
 }
@@ -147,53 +140,73 @@ function SongList({
   items,
   excludeSongIds,
   isManager,
-  onChanged,
 }: {
   playlistId: string
   items: Array<{
     itemId: string
     position: number
-    song: {
-      id: string
-      title: string
-      composer: string | null
-      arranger: string | null
-      key: string | null
-      tempo: string | null
-    }
+    song: EditableSong
   }>
   excludeSongIds: Set<string>
   isManager: boolean
-  onChanged: () => void
 }) {
   const confirm = useConfirm()
   // dnd-kit otherwise numbers its aria ids with a module counter, which differs
   // between the SSR render and hydration.
   const dndId = useId()
-  const [order, setOrder] = useState(items.map((i) => i.itemId))
-  if (order.length !== items.length || order.some((id) => !items.some((i) => i.itemId === id))) {
-    setOrder(items.map((i) => i.itemId))
-  }
   const [addOpen, setAddOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const detailKey = playlistQueries.detail(playlistId).queryKey
+  // Ordering, membership and dates also drive the dashboard and share pages.
+  const invalidates = [playlistKeys.all]
+
+  const reorder = useMutation({
+    mutationFn: (itemIdsInOrder: Array<string>) => reorderPlaylistFn({ data: { playlistId, itemIdsInOrder } }),
+    // Optimistic: the dropped row stays where it was dropped while saving.
+    onMutate: async (itemIdsInOrder) => {
+      await queryClient.cancelQueries({ queryKey: detailKey })
+      const previous = queryClient.getQueryData(detailKey)
+      queryClient.setQueryData(detailKey, (old) =>
+        old
+          ? {
+              ...old,
+              items: itemIdsInOrder.flatMap((id, position) => {
+                const item = old.items.find((i) => i.itemId === id)
+                return item ? [{ ...item, position }] : []
+              }),
+            }
+          : old,
+      )
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(detailKey, context.previous)
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: playlistKeys.all }),
+    meta: { errorMessage: "L'ordre n'a pas pu être enregistré, la playlist a été rechargée" },
+  })
+  const addSong = useMutation({
+    mutationFn: (songId: string) => addSongToPlaylistFn({ data: { playlistId, songId } }),
+    meta: { errorMessage: 'Ajout impossible', invalidates },
+  })
+  const removeItem = useMutation({
+    mutationFn: (itemId: string) => removePlaylistItemFn({ data: { playlistId, itemId } }),
+    meta: { errorMessage: 'Retrait impossible', invalidates },
+  })
+  const order = items.map((i) => i.itemId)
 
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  async function handleDragEnd(event: DragEndEvent) {
+  function handleDragEnd(event: DragEndEvent) {
     if (!isManager) return
     const { active, over } = event
     if (!over || active.id === over.id) return
     const oldIndex = order.indexOf(String(active.id))
     const newIndex = order.indexOf(String(over.id))
-    const next = arrayMove(order, oldIndex, newIndex)
-    setOrder(next)
-    await attempt(
-      () => reorderPlaylistFn({ data: { playlistId, itemIdsInOrder: next } }),
-      "L'ordre n'a pas pu être enregistré, la playlist a été rechargée",
-    )
-    onChanged()
+    reorder.mutate(arrayMove(order, oldIndex, newIndex))
   }
 
   const byId = new Map(items.map((i) => [i.itemId, i]))
@@ -220,10 +233,7 @@ function SongList({
                 </DialogHeader>
                 <AddSongTable
                   excludeSongIds={excludeSongIds}
-                  onAdd={async (songId) => {
-                    await attempt(() => addSongToPlaylistFn({ data: { playlistId, songId } }), 'Ajout impossible')
-                    onChanged()
-                  }}
+                  onAdd={(songId) => addSong.mutateAsync(songId).then(() => undefined, () => undefined)}
                 />
               </DialogContent>
             </Dialog>
@@ -242,7 +252,6 @@ function SongList({
                   itemId={itemId}
                   song={item.song}
                   isManager={isManager}
-                  onChanged={onChanged}
                   onRemove={async () => {
                     const ok = await confirm({
                       title: 'Retirer ce chant',
@@ -250,8 +259,7 @@ function SongList({
                       confirmLabel: 'Retirer',
                     })
                     if (!ok) return
-                    await attempt(() => removePlaylistItemFn({ data: { playlistId, itemId } }), 'Retrait impossible')
-                    onChanged()
+                    removeItem.mutate(itemId)
                   }}
                 />
               )
@@ -266,24 +274,25 @@ function SongList({
   )
 }
 
+type EditableSong = {
+  id: string
+  title: string
+  composer: string | null
+  arranger: string | null
+  key: string | null
+  tempo: string | null
+  notes: string | null
+}
+
 function SortableSongRow({
   itemId,
   song,
   isManager,
-  onChanged,
   onRemove,
 }: {
   itemId: string
-  song: {
-    id: string
-    title: string
-    composer: string | null
-    arranger: string | null
-    key: string | null
-    tempo: string | null
-  }
+  song: EditableSong
   isManager: boolean
-  onChanged: () => void
   onRemove: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -330,13 +339,7 @@ function SortableSongRow({
               <DialogHeader>
                 <DialogTitle>Modifier le chant</DialogTitle>
               </DialogHeader>
-              <EditSongForm
-                song={song}
-                onSaved={async () => {
-                  setEditOpen(false)
-                  onChanged()
-                }}
-              />
+              <EditSongForm song={song} onSaved={() => setEditOpen(false)} />
             </DialogContent>
           </Dialog>
         ) : null}
@@ -359,16 +362,11 @@ function SortableSongRow({
 
 function SongDetailsDialog({ songId }: { songId: string }) {
   const [open, setOpen] = useState(false)
-  const [data, setData] = useState<Awaited<ReturnType<typeof getSongFn>> | null>(null)
+  // Only fetched once the dialog is opened; shared with the song page cache.
+  const { data } = useQuery({ ...songQueries.detail(songId), enabled: open })
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next)
-        if (next && !data) getSongFn({ data: { songId } }).then(setData)
-      }}
-    >
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <button className="text-xs text-muted-foreground hover:underline">Détails</button>
       </DialogTrigger>
@@ -418,17 +416,13 @@ function EditSongForm({
   song,
   onSaved,
 }: {
-  song: {
-    id: string
-    title: string
-    composer: string | null
-    arranger: string | null
-    key: string | null
-    tempo: string | null
-  }
+  song: EditableSong
   onSaved: () => void
 }) {
-  const [serverError, setServerError] = useState<string | null>(null)
+  const updateSong = useMutation({
+    mutationFn: (data: UpdateSongInput) => updateSongFn({ data }),
+    meta: { invalidates: [songKeys.all, playlistKeys.all] },
+  })
 
   const form = useAppForm({
     defaultValues: {
@@ -440,23 +434,21 @@ function EditSongForm({
     },
     validators: { onChange: CreateSongForm },
     onSubmit: async ({ value }) => {
-      setServerError(null)
       try {
-        await updateSongFn({
-          data: {
-            songId: song.id,
-            title: value.title,
-            composer: value.composer || null,
-            arranger: value.arranger || null,
-            key: value.key || null,
-            tempo: value.tempo || null,
-            notes: null,
-          },
+        await updateSong.mutateAsync({
+          songId: song.id,
+          title: value.title,
+          composer: value.composer || null,
+          arranger: value.arranger || null,
+          key: value.key || null,
+          tempo: value.tempo || null,
+          // Not editable here: keep it instead of wiping it.
+          notes: song.notes,
         })
-        onSaved()
       } catch {
-        setServerError('Impossible de modifier le chant')
+        return // shown inline below
       }
+      onSaved()
     },
   })
 
@@ -478,7 +470,7 @@ function EditSongForm({
         <form.AppField name="key" children={(field) => <field.TextField label="Tonalité" placeholder="Ré majeur" />} />
         <form.AppField name="tempo" children={(field) => <field.TextField label="Tempo" placeholder="90 BPM" />} />
       </div>
-      {serverError ? <p className="text-sm text-destructive">{serverError}</p> : null}
+      {updateSong.isError ? <p className="text-sm text-destructive">Impossible de modifier le chant</p> : null}
       <form.AppForm>
         <form.SubmitButton label="Enregistrer" pendingLabel="Enregistrement…" />
       </form.AppForm>
@@ -493,33 +485,10 @@ function AddSongTable({
   excludeSongIds: Set<string>
   onAdd: (songId: string) => Promise<void>
 }) {
-  const [q, setQ] = useState('')
-  const [searchInput, setSearchInput] = useState('')
-  const [page, setPage] = useState(1)
-  const [result, setResult] = useState<{
-    rows: Array<{ id: string; title: string; composer: string | null }>
-    total: number
-    pageSize: number
-  } | null>(null)
+  const { searchInput, setSearchInput, params, setPage } = useSearchPaging()
+  const page = params.page
+  const { data: result } = useQuery(songQueries.list(params))
   const [addingId, setAddingId] = useState<string | null>(null)
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setQ(searchInput)
-      setPage(1)
-    }, 300)
-    return () => clearTimeout(timeout)
-  }, [searchInput])
-
-  useEffect(() => {
-    let cancelled = false
-    listSongsFn({ data: { q, page } }).then((res) => {
-      if (!cancelled) setResult(res)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [q, page])
 
   const rows = (result?.rows ?? []).filter((s) => !excludeSongIds.has(s.id))
   const totalPages = Math.max(1, Math.ceil((result?.total ?? 0) / (result?.pageSize ?? 1)))
@@ -578,16 +547,23 @@ function EventDatesCard({
   playlistId,
   eventDates,
   isManager,
-  onChanged,
 }: {
   playlistId: string
   eventDates: Array<{ id: string; eventDate: string | Date }>
   isManager: boolean
-  onChanged: () => void
 }) {
   const confirm = useConfirm()
   const [value, setValue] = useState('')
-  const [adding, setAdding] = useState(false)
+  const invalidates = [playlistKeys.all]
+  const addDate = useMutation({
+    mutationFn: (eventDate: string) => addEventDateFn({ data: { playlistId, eventDate } }),
+    meta: { errorMessage: 'Ajout de la date impossible', invalidates },
+    onSuccess: () => setValue(''),
+  })
+  const removeDate = useMutation({
+    mutationFn: (eventDateId: string) => removeEventDateFn({ data: { playlistId, eventDateId } }),
+    meta: { errorMessage: 'Suppression impossible', invalidates },
+  })
 
   return (
     <Card>
@@ -612,11 +588,7 @@ function EventDatesCard({
                       confirmLabel: 'Supprimer',
                     })
                     if (!ok) return
-                    await attempt(
-                      () => removeEventDateFn({ data: { playlistId, eventDateId: d.id } }),
-                      'Suppression impossible',
-                    )
-                    onChanged()
+                    removeDate.mutate(d.id)
                   }}
                 >
                   Supprimer
@@ -642,20 +614,10 @@ function EventDatesCard({
               />
             </div>
             <Button
-              disabled={adding || !value}
-              onClick={async () => {
-                setAdding(true)
-                const ok = await attempt(
-                  () => addEventDateFn({ data: { playlistId, eventDate: new Date(value).toISOString() } }),
-                  "Ajout de la date impossible",
-                )
-                setAdding(false)
-                if (!ok) return
-                setValue('')
-                onChanged()
-              }}
+              disabled={addDate.isPending || !value}
+              onClick={() => addDate.mutate(new Date(value).toISOString())}
             >
-              {adding ? 'Ajout…' : 'Ajouter'}
+              {addDate.isPending ? 'Ajout…' : 'Ajouter'}
             </Button>
           </div>
         ) : null}
@@ -687,7 +649,6 @@ function ShareLinksCard({
   shareLinks,
   allGroups,
   isManager,
-  onChanged,
 }: {
   playlistId: string
   shareLinks: Array<{
@@ -696,11 +657,19 @@ function ShareLinksCard({
   }>
   allGroups: Array<{ id: string; name: string }>
   isManager: boolean
-  onChanged: () => void
 }) {
   const confirm = useConfirm()
   const [groupIds, setGroupIds] = useState<Set<string>>(new Set())
-  const [creating, setCreating] = useState(false)
+  const invalidates = [playlistKeys.shareLinks(playlistId)]
+  const createLink = useMutation({
+    mutationFn: (ids: Array<string>) => createShareLinkFn({ data: { playlistId, groupIds: ids } }),
+    meta: { errorMessage: 'Création du lien impossible', invalidates },
+    onSuccess: () => setGroupIds(new Set()),
+  })
+  const revokeLink = useMutation({
+    mutationFn: (shareLinkId: string) => revokeShareLinkFn({ data: { shareLinkId } }),
+    meta: { errorMessage: 'Révocation impossible', invalidates },
+  })
   // Read after mount only — window.location during SSR would mismatch the client render.
   const [origin, setOrigin] = useState('')
   useEffect(() => setOrigin(window.location.origin), [])
@@ -739,21 +708,8 @@ function ShareLinksCard({
                 </div>
               </div>
             ) : null}
-            <Button
-              disabled={creating}
-              onClick={async () => {
-                setCreating(true)
-                const ok = await attempt(
-                  () => createShareLinkFn({ data: { playlistId, groupIds: [...groupIds] } }),
-                  'Création du lien impossible',
-                )
-                setCreating(false)
-                if (!ok) return
-                setGroupIds(new Set())
-                onChanged()
-              }}
-            >
-              {creating ? 'Création…' : 'Créer un lien'}
+            <Button disabled={createLink.isPending} onClick={() => createLink.mutate([...groupIds])}>
+              {createLink.isPending ? 'Création…' : 'Créer un lien'}
             </Button>
           </>
         ) : null}
@@ -775,11 +731,7 @@ function ShareLinksCard({
                           confirmLabel: 'Révoquer',
                         })
                         if (!ok) return
-                        if (
-                          !(await attempt(() => revokeShareLinkFn({ data: { shareLinkId: link.id } }), 'Révocation impossible'))
-                        )
-                          return
-                        onChanged()
+                        revokeLink.mutate(link.id)
                       }}
                     >
                       Révoquer

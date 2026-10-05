@@ -3,7 +3,9 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { PdfViewer } from '@/components/pdf-viewer'
-import { getPublicAssetUrlsFn } from '@/server/shareLinks'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { publicQueries } from '@/queries/public'
+import { mergePdfs, NoPagesError } from '@/lib/merge-pdfs'
 import { buildBundles, type BundleFile, type SharedItem } from '@/domain/share-bundles'
 
 export function SharedBundles({ token, items }: { token: string; items: Array<SharedItem> }) {
@@ -34,6 +36,7 @@ function fileTitle(f: BundleFile) {
 
 // Plays every track in order and wraps back to the first one, forever.
 function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<BundleFile> }) {
+  const queryClient = useQueryClient()
   const audioRef = useRef<HTMLAudioElement>(null)
   const [index, setIndex] = useState(0)
   const [freshUrls, setFreshUrls] = useState<Record<string, string>>({})
@@ -83,9 +86,12 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
     if (!refreshed.current.has(current.assetId)) {
       refreshed.current.add(current.assetId)
       try {
-        const urls = await getPublicAssetUrlsFn({
-          data: { token, assetIds: tracks.map((t) => t.assetId) },
-        })
+        const urls = await queryClient.fetchQuery(
+          publicQueries.assetUrls(
+            token,
+            tracks.map((t) => t.assetId),
+          ),
+        )
         setFreshUrls((prev) => ({ ...prev, ...urls }))
         return
       } catch {
@@ -165,49 +171,36 @@ function MergedPdfButton({
   audience: string
   scores: Array<BundleFile>
 }) {
-  const [loading, setLoading] = useState(false)
+  const queryClient = useQueryClient()
   const [merged, setMerged] = useState<{ url: string; pages: number } | null>(null)
 
   useEffect(() => () => {
     if (merged) URL.revokeObjectURL(merged.url)
   }, [merged])
 
-  const merge = async () => {
-    setLoading(true)
-    try {
-      const { PDFDocument } = await import('pdf-lib')
-      const urls = await getPublicAssetUrlsFn({
-        data: { token, assetIds: scores.map((s) => s.assetId) },
-      })
-      const out = await PDFDocument.create()
-      for (const s of scores) {
-        const url = urls[s.assetId]
-        if (!url) continue
-        const res = await fetch(url)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const doc = await PDFDocument.load(await res.arrayBuffer(), { ignoreEncryption: true })
-        const pages = await out.copyPages(doc, doc.getPageIndices())
-        pages.forEach((p) => out.addPage(p))
-      }
-      const pages = out.getPageCount()
-      if (pages === 0) {
-        toast.error('Aucune page à afficher')
-        return
-      }
-      const bytes = await out.save()
+  const merge = useMutation({
+    mutationFn: async () => {
+      // Fresh URLs: the page may have been open longer than they live.
+      const urls = await queryClient.fetchQuery(
+        publicQueries.assetUrls(
+          token,
+          scores.map((s) => s.assetId),
+        ),
+      )
+      return mergePdfs(scores.flatMap((s) => (urls[s.assetId] ? [urls[s.assetId]!] : [])))
+    },
+    onSuccess: ({ bytes, pages }) => {
       const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
       setMerged({ url: URL.createObjectURL(blob), pages })
-    } catch {
-      toast.error('Impossible de fusionner les partitions')
-    } finally {
-      setLoading(false)
-    }
-  }
+    },
+    onError: (error) =>
+      toast.error(error instanceof NoPagesError ? 'Aucune page à afficher' : 'Impossible de fusionner les partitions'),
+  })
 
   return (
     <>
-      <Button variant="outline" size="sm" disabled={loading} onClick={merge}>
-        {loading ? 'Fusion…' : `Partitions (${scores.length} PDF)`}
+      <Button variant="outline" size="sm" disabled={merge.isPending} onClick={() => merge.mutate()}>
+        {merge.isPending ? 'Fusion…' : `Partitions (${scores.length} PDF)`}
       </Button>
       <Dialog open={merged !== null} onOpenChange={(open) => !open && setMerged(null)}>
         <DialogContent className="sm:max-w-2xl">

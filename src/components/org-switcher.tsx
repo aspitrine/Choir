@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -31,13 +32,21 @@ function slugify(name: string) {
 
 export function OrgSwitcher() {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const { data: organizations, refetch } = authClient.useListOrganizations()
   const { data: activeOrganization, isPending: activeOrgPending } = authClient.useActiveOrganization()
   const [createOpen, setCreateOpen] = useState(false)
 
+  // Every cached query belongs to the previous choir: drop them all (session and
+  // role included) before the loaders run again for the new one.
+  async function resetForActiveOrganization() {
+    queryClient.removeQueries()
+    await router.invalidate()
+  }
+
   async function switchTo(organizationId: string) {
     await authClient.organization.setActive({ organizationId })
-    await router.invalidate()
+    await resetForActiveOrganization()
   }
 
   // A session (e.g. after a fresh login) has no active org until one is picked —
@@ -95,7 +104,7 @@ export function OrgSwitcher() {
             onCreated={async () => {
               setCreateOpen(false)
               await refetch()
-              await router.invalidate()
+              await resetForActiveOrganization()
             }}
           />
         </DialogContent>

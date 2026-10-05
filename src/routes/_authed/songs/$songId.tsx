@@ -1,4 +1,5 @@
-import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,25 +16,25 @@ import {
   DialogDescription,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { getSongFn, deleteSongFn } from '@/server/songs'
-import { createUploadIntentFn, confirmUploadFn, deleteAssetFn, setAssetGroupsFn } from '@/server/assets'
-import { listGroupsFn } from '@/server/groups'
-import { getMyRoleFn } from '@/server/members'
+import { deleteSongFn } from '@/server/songs'
+import { deleteAssetFn, setAssetGroupsFn } from '@/server/assets'
+import { songKeys, songQueries } from '@/queries/songs'
+import { groupQueries } from '@/queries/groups'
+import { playlistKeys } from '@/queries/playlists'
+import { useIsManager } from '@/queries/session'
+import { uploadAsset } from '@/lib/upload-asset'
 import { PdfViewer } from '@/components/pdf-viewer'
 import { AudioPlayer } from '@/components/audio-player'
 import { useConfirm } from '@/components/confirm-dialog'
 import { PLAYABLE_AUDIO_MIME_TYPES, SCORE_MIME_TYPES, guessAssetKind } from '@/domain/songs'
-import { attempt } from '@/lib/attempt'
 
 export const Route = createFileRoute('/_authed/songs/$songId')({
-  loader: async ({ params }) => {
+  loader: async ({ params, context: { queryClient } }) => {
     try {
-      const [data, allGroups, role] = await Promise.all([
-        getSongFn({ data: { songId: params.songId } }),
-        listGroupsFn(),
-        getMyRoleFn(),
+      await Promise.all([
+        queryClient.ensureQueryData(songQueries.detail(params.songId)),
+        queryClient.ensureQueryData(groupQueries.options()),
       ])
-      return { ...data, allGroups, role }
     } catch {
       throw redirect({ to: '/songs' })
     }
@@ -51,10 +52,25 @@ type AssetWithGroups = {
 }
 
 function SongDetailPage() {
-  const { song, assets, allGroups, role } = Route.useLoaderData()
-  const isManager = role === 'owner' || role === 'admin'
-  const router = useRouter()
+  const { songId } = Route.useParams()
+  const {
+    data: { song, assets },
+  } = useSuspenseQuery(songQueries.detail(songId))
+  const { data: allGroups } = useSuspenseQuery(groupQueries.options())
+  const isManager = useIsManager()
   const navigate = Route.useNavigate()
+  const queryClient = useQueryClient()
+  const deleteSong = useMutation({
+    mutationFn: () => deleteSongFn({ data: { songId } }),
+    meta: { errorMessage: 'Suppression impossible' },
+    onSuccess: async () => {
+      await navigate({ to: '/songs' })
+      // Removed songs disappear from lists and playlists.
+      queryClient.removeQueries({ queryKey: songKeys.detail(songId) })
+      await queryClient.invalidateQueries({ queryKey: songKeys.lists() })
+      await queryClient.invalidateQueries({ queryKey: playlistKeys.all })
+    },
+  })
   const confirm = useConfirm()
   const [uploadOpen, setUploadOpen] = useState(false)
 
@@ -78,8 +94,7 @@ function SongDetailPage() {
                   confirmLabel: 'Supprimer',
                 })
                 if (!ok) return
-                if (!(await attempt(() => deleteSongFn({ data: { songId: song.id } }), 'Suppression impossible'))) return
-                navigate({ to: '/songs' })
+                deleteSong.mutate()
               }}
             >
               Supprimer
@@ -105,14 +120,7 @@ function SongDetailPage() {
                     <DialogTitle>Ajouter un fichier</DialogTitle>
                     <DialogDescription>Partition (PDF) ou audio</DialogDescription>
                   </DialogHeader>
-                  <UploadForm
-                    songId={song.id}
-                    allGroups={allGroups}
-                    onUploaded={async () => {
-                      setUploadOpen(false)
-                      await router.invalidate()
-                    }}
-                  />
+                  <UploadForm songId={song.id} allGroups={allGroups} onUploaded={() => setUploadOpen(false)} />
                 </DialogContent>
               </Dialog>
             ) : null}
@@ -134,9 +142,9 @@ function SongDetailPage() {
                 <AssetRow
                   key={a.id}
                   asset={a as AssetWithGroups}
+                  songId={song.id}
                   allGroups={allGroups}
                   isManager={isManager}
-                  onChanged={() => router.invalidate()}
                 />
               ))}
               {assets.length === 0 ? (
@@ -156,20 +164,30 @@ function SongDetailPage() {
 
 function AssetRow({
   asset,
+  songId,
   allGroups,
   isManager,
-  onChanged,
 }: {
   asset: AssetWithGroups
+  songId: string
   allGroups: Array<{ id: string; name: string }>
   isManager: boolean
-  onChanged: () => void
 }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [selected, setSelected] = useState(new Set(asset.groups.map((g) => g.id)))
-  const [saving, setSaving] = useState(false)
+  // Asset changes show on this song and through playlists' song dialogs.
+  const invalidates = [songKeys.detail(songId)]
+  const setGroups = useMutation({
+    mutationFn: (groupIds: Array<string>) => setAssetGroupsFn({ data: { assetId: asset.id, groupIds } }),
+    meta: { errorMessage: 'Enregistrement impossible', invalidates },
+    onSuccess: () => setOpen(false),
+  })
+  const deleteAsset = useMutation({
+    mutationFn: () => deleteAssetFn({ data: { assetId: asset.id } }),
+    meta: { errorMessage: 'Suppression impossible', invalidates },
+  })
 
   return (
     <TableRow>
@@ -221,21 +239,8 @@ function AssetRow({
                   <p className="text-sm text-muted-foreground">Aucun groupe créé pour l'instant</p>
                 ) : null}
               </div>
-              <Button
-                disabled={saving}
-                onClick={async () => {
-                  setSaving(true)
-                  const ok = await attempt(
-                    () => setAssetGroupsFn({ data: { assetId: asset.id, groupIds: [...selected] } }),
-                    'Enregistrement impossible',
-                  )
-                  setSaving(false)
-                  if (!ok) return
-                  setOpen(false)
-                  onChanged()
-                }}
-              >
-                {saving ? 'Enregistrement…' : 'Enregistrer'}
+              <Button disabled={setGroups.isPending} onClick={() => setGroups.mutate([...selected])}>
+                {setGroups.isPending ? 'Enregistrement…' : 'Enregistrer'}
               </Button>
             </DialogContent>
           </Dialog>
@@ -273,8 +278,7 @@ function AssetRow({
                 confirmLabel: 'Supprimer',
               })
               if (!ok) return
-              if (!(await attempt(() => deleteAssetFn({ data: { assetId: asset.id } }), 'Suppression impossible'))) return
-              onChanged()
+              deleteAsset.mutate()
             }}
           >
             Supprimer
@@ -307,51 +311,29 @@ function UploadForm({
   const [labelTouched, setLabelTouched] = useState(false)
   const [groupIds, setGroupIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
+  const upload = useMutation({
+    mutationFn: uploadAsset,
+    meta: { invalidates: [songKeys.detail(songId)] },
+    onSuccess: () => {
+      setFile(null)
+      setLabel('')
+      setLabelTouched(false)
+      setGroupIds(new Set())
+      onUploaded()
+    },
+    onError: () => setError("Échec de l'envoi"),
+  })
 
   const kind = file ? guessAssetKind(file.type) : null
 
-  async function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!file) {
       setError('Choisissez un fichier')
       return
     }
     setError(null)
-    setUploading(true)
-    let pendingAssetId: string | null = null
-    try {
-      const { assetId, uploadUrl } = await createUploadIntentFn({
-        data: {
-          songId,
-          kind: guessAssetKind(file.type),
-          label: label || null,
-          filename: file.name,
-          contentType: file.type || 'application/octet-stream',
-          groupIds: [...groupIds],
-        },
-      })
-      pendingAssetId = assetId
-      const res = await fetch(uploadUrl, {
-        method: 'PUT',
-        body: file,
-        headers: { 'Content-Type': file.type || 'application/octet-stream' },
-      })
-      if (!res.ok) throw new Error('upload failed')
-      await confirmUploadFn({ data: { assetId } })
-      pendingAssetId = null
-      setFile(null)
-      setLabel('')
-      setLabelTouched(false)
-      setGroupIds(new Set())
-      onUploaded()
-    } catch {
-      // Don't leave a row stuck in "uploading" behind a failed transfer.
-      if (pendingAssetId) await deleteAssetFn({ data: { assetId: pendingAssetId } }).catch(() => {})
-      setError("Échec de l'envoi")
-    } finally {
-      setUploading(false)
-    }
+    upload.mutate({ songId, file, label: label || null, groupIds: [...groupIds] })
   }
 
   return (
@@ -427,8 +409,8 @@ function UploadForm({
       ) : null}
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      <Button type="submit" className="w-full" disabled={uploading || !file}>
-        {uploading ? 'Envoi…' : 'Envoyer'}
+      <Button type="submit" className="w-full" disabled={upload.isPending || !file}>
+        {upload.isPending ? 'Envoi…' : 'Envoyer'}
       </Button>
     </form>
   )

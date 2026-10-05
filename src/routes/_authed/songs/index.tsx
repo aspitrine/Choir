@@ -1,4 +1,5 @@
-import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { useMutation, useSuspenseQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { Schema } from 'effect'
 import { Button } from '@/components/ui/button'
@@ -15,9 +16,10 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { TablePager } from '@/components/table-pager'
 import { useAppForm } from '@/lib/form'
-import { CreateSongForm } from '@/domain/songs'
-import { listSongsFn, createSongFn } from '@/server/songs'
-import { getMyRoleFn } from '@/server/members'
+import { CreateSongForm, type CreateSongInput } from '@/domain/songs'
+import { createSongFn } from '@/server/songs'
+import { songKeys, songQueries } from '@/queries/songs'
+import { useIsManager } from '@/queries/session'
 
 const SongsSearch = Schema.Struct({
   q: Schema.optional(Schema.String),
@@ -27,19 +29,18 @@ const SongsSearch = Schema.Struct({
 export const Route = createFileRoute('/_authed/songs/')({
   validateSearch: (search) => Schema.decodeUnknownSync(SongsSearch)(search),
   loaderDeps: ({ search }) => ({ q: search.q ?? '', page: search.page ?? 1 }),
-  loader: async ({ deps }) => {
-    const [page, role] = await Promise.all([listSongsFn({ data: deps }), getMyRoleFn()])
-    return { ...page, role }
-  },
+  loader: ({ deps, context: { queryClient } }) => queryClient.ensureQueryData(songQueries.list(deps)),
   component: SongsPage,
 })
 
 function SongsPage() {
-  const { rows: songs, total, page, pageSize, role } = Route.useLoaderData()
-  const isManager = role === 'owner' || role === 'admin'
+  const deps = Route.useLoaderDeps()
+  const {
+    data: { rows: songs, total, page, pageSize },
+  } = useSuspenseQuery(songQueries.list(deps))
+  const isManager = useIsManager()
   const { q } = Route.useSearch()
   const navigate = Route.useNavigate()
-  const router = useRouter()
   const [open, setOpen] = useState(isManager && total === 0)
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -72,12 +73,7 @@ function SongsPage() {
                 <DialogTitle>Nouveau chant</DialogTitle>
                 <DialogDescription>Titre requis, le reste est optionnel</DialogDescription>
               </DialogHeader>
-              <CreateSongDialogForm
-                onCreated={async () => {
-                  setOpen(false)
-                  await router.invalidate()
-                }}
-              />
+              <CreateSongDialogForm onCreated={() => setOpen(false)} />
             </DialogContent>
           </Dialog>
         ) : null}
@@ -135,7 +131,10 @@ function SongsPage() {
 }
 
 function CreateSongDialogForm({ onCreated }: { onCreated: () => void }) {
-  const [serverError, setServerError] = useState<string | null>(null)
+  const createSong = useMutation({
+    mutationFn: (data: CreateSongInput) => createSongFn({ data }),
+    meta: { invalidates: [songKeys.all] },
+  })
 
   const form = useAppForm({
     defaultValues: {
@@ -147,23 +146,20 @@ function CreateSongDialogForm({ onCreated }: { onCreated: () => void }) {
     },
     validators: { onChange: CreateSongForm },
     onSubmit: async ({ value, formApi }) => {
-      setServerError(null)
       try {
-        await createSongFn({
-          data: {
-            title: value.title,
-            composer: value.composer || null,
-            arranger: value.arranger || null,
-            key: value.key || null,
-            tempo: value.tempo || null,
-            notes: null,
-          },
+        await createSong.mutateAsync({
+          title: value.title,
+          composer: value.composer || null,
+          arranger: value.arranger || null,
+          key: value.key || null,
+          tempo: value.tempo || null,
+          notes: null,
         })
-        formApi.reset()
-        onCreated()
       } catch {
-        setServerError('Impossible de créer le chant')
+        return // shown inline below
       }
+      formApi.reset()
+      onCreated()
     },
   })
 
@@ -185,7 +181,7 @@ function CreateSongDialogForm({ onCreated }: { onCreated: () => void }) {
         <form.AppField name="key" children={(field) => <field.TextField label="Tonalité" placeholder="Ré majeur" />} />
         <form.AppField name="tempo" children={(field) => <field.TextField label="Tempo" placeholder="90 BPM" />} />
       </div>
-      {serverError ? <p className="text-sm text-destructive">{serverError}</p> : null}
+      {createSong.isError ? <p className="text-sm text-destructive">Impossible de créer le chant</p> : null}
       <form.AppForm>
         <form.SubmitButton label="Créer" pendingLabel="Création…" />
       </form.AppForm>

@@ -9,6 +9,18 @@ pnpm install
 pnpm dev
 ```
 
+# Data layer (TanStack Query)
+
+- **Reads**: one `queryOptions` factory per resource in `src/queries/` (keys in `src/queries/keys.ts`).
+  Route loaders call `context.queryClient.ensureQueryData(...)`; components read the same options with
+  `useSuspenseQuery` (or `useQuery` + `keepPreviousData` for in-component search/paging).
+- **Writes**: `useMutation` calling the server function, with
+  `meta: { invalidates: [someKeys.all], errorMessage: '…' }` — the global `MutationCache`
+  (`src/lib/query-client.ts`) refetches those keys before `mutateAsync` resolves and toasts the message on failure.
+  Forms omit `errorMessage` and show `mutation.isError` inline instead.
+- The `QueryClient` is created per router (so per request during SSR) and wired with
+  `setupRouterSsrQueryIntegration`; switching choir clears the whole cache.
+
 # Testing
 
 ```bash

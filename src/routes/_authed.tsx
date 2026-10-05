@@ -4,12 +4,13 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { AppSidebar } from '@/components/app-sidebar'
 import { OrgSwitcher } from '@/components/org-switcher'
 import { ConfirmProvider } from '@/components/confirm-dialog'
-import { getSessionFn } from '../server/auth'
-import { getMyRoleFn } from '../server/members'
+import { sessionQueries, useRole } from '@/queries/session'
 
 export const Route = createFileRoute('/_authed')({
-  beforeLoad: async ({ location }) => {
-    const session = await getSessionFn()
+  beforeLoad: async ({ location, context: { queryClient } }) => {
+    // fetchQuery honours staleTime: navigating between pages reuses the cached
+    // session and role instead of two server round-trips per navigation.
+    const session = await queryClient.fetchQuery(sessionQueries.current())
 
     if (!session) {
       throw redirect({ to: '/' })
@@ -17,18 +18,18 @@ export const Route = createFileRoute('/_authed')({
 
     // No role = no active org yet (e.g. just signed up) or no longer a member of it.
     // Only the dashboard (with its org picker) makes sense then.
-    const role = await getMyRoleFn().catch(() => null)
+    const role = await queryClient.fetchQuery(sessionQueries.role())
     if (role === null && location.pathname !== '/dashboard') {
       throw redirect({ to: '/dashboard' })
     }
 
-    return { session, role }
+    return { session }
   },
   component: AuthedLayout,
 })
 
 function AuthedLayout() {
-  const { role } = Route.useRouteContext()
+  const role = useRole()
 
   return (
     <TooltipProvider>

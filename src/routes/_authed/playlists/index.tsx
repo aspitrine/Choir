@@ -1,4 +1,5 @@
-import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { useMutation, useSuspenseQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -13,21 +14,18 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useAppForm } from '@/lib/form'
 import { CreateGroupForm } from '@/domain/groups'
-import { listPlaylistsFn, createPlaylistFn } from '@/server/playlists'
-import { getMyRoleFn } from '@/server/members'
+import { createPlaylistFn } from '@/server/playlists'
+import { playlistKeys, playlistQueries } from '@/queries/playlists'
+import { useIsManager } from '@/queries/session'
 
 export const Route = createFileRoute('/_authed/playlists/')({
-  loader: async () => {
-    const [playlists, role] = await Promise.all([listPlaylistsFn(), getMyRoleFn()])
-    return { playlists, role }
-  },
+  loader: ({ context: { queryClient } }) => queryClient.ensureQueryData(playlistQueries.list()),
   component: PlaylistsPage,
 })
 
 function PlaylistsPage() {
-  const { playlists, role } = Route.useLoaderData()
-  const isManager = role === 'owner' || role === 'admin'
-  const router = useRouter()
+  const { data: playlists } = useSuspenseQuery(playlistQueries.list())
+  const isManager = useIsManager()
   const [open, setOpen] = useState(isManager && playlists.length === 0)
 
   return (
@@ -47,12 +45,7 @@ function PlaylistsPage() {
                 <DialogTitle>Nouvelle playlist</DialogTitle>
                 <DialogDescription>Ex: Messe de Noël, Répétition du 12 mars…</DialogDescription>
               </DialogHeader>
-              <CreatePlaylistDialogForm
-                onCreated={async () => {
-                  setOpen(false)
-                  await router.invalidate()
-                }}
-              />
+              <CreatePlaylistDialogForm onCreated={() => setOpen(false)} />
             </DialogContent>
           </Dialog>
         ) : null}
@@ -94,20 +87,22 @@ function PlaylistsPage() {
 }
 
 function CreatePlaylistDialogForm({ onCreated }: { onCreated: () => void }) {
-  const [serverError, setServerError] = useState<string | null>(null)
+  const createPlaylist = useMutation({
+    mutationFn: (name: string) => createPlaylistFn({ data: { name, description: null } }),
+    meta: { invalidates: [playlistKeys.all] },
+  })
 
   const form = useAppForm({
     defaultValues: { name: '' },
     validators: { onChange: CreateGroupForm },
     onSubmit: async ({ value, formApi }) => {
-      setServerError(null)
       try {
-        await createPlaylistFn({ data: { name: value.name, description: null } })
-        formApi.reset()
-        onCreated()
+        await createPlaylist.mutateAsync(value.name)
       } catch {
-        setServerError('Impossible de créer la playlist')
+        return // shown inline below
       }
+      formApi.reset()
+      onCreated()
     },
   })
 
@@ -123,7 +118,7 @@ function CreatePlaylistDialogForm({ onCreated }: { onCreated: () => void }) {
         name="name"
         children={(field) => <field.TextField label="Nom" placeholder="Messe de Noël" autoFocus />}
       />
-      {serverError ? <p className="text-sm text-destructive">{serverError}</p> : null}
+      {createPlaylist.isError ? <p className="text-sm text-destructive">Impossible de créer la playlist</p> : null}
       <form.AppForm>
         <form.SubmitButton label="Créer" pendingLabel="Création…" />
       </form.AppForm>

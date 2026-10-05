@@ -1,4 +1,5 @@
-import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { Copy, Check } from 'lucide-react'
@@ -20,38 +21,39 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { TablePager } from '@/components/table-pager'
 import { useConfirm } from '@/components/confirm-dialog'
 import {
-  searchMembersFn,
-  searchInvitationsFn,
   createInviteFn,
   revokeInviteFn,
   updateMemberRoleFn,
   updateMemberGroupsFn,
   removeMemberFn,
   deleteOrganizationFn,
-  getMyRoleFn,
 } from '@/server/members'
-import { listGroupsFn } from '@/server/groups'
+import { memberKeys, memberQueries } from '@/queries/members'
+import { groupQueries } from '@/queries/groups'
+import { isManagerRole, sessionQueries, useRole } from '@/queries/session'
+import { useSearchPaging } from '@/hooks/use-search-paging'
 import { authClient, useSession } from '@/lib/auth-client'
 import type { InviteRole } from '@/services/Members'
-import type { Page } from '@/domain/pagination'
-import { attempt } from '@/lib/attempt'
+import type { Page, PageParams } from '@/domain/pagination'
 
 export const Route = createFileRoute('/_authed/members/')({
-  loader: async () => {
-    try {
-      const [members, invitations, allGroups, role] = await Promise.all([
-        searchMembersFn({ data: { q: '', page: 1 } }),
-        searchInvitationsFn({ data: { q: '', page: 1 } }),
-        listGroupsFn(),
-        getMyRoleFn(),
-      ])
-      return { members, invitations, allGroups, role }
-    } catch {
+  // Managers only (the server refuses the lists to plain members).
+  beforeLoad: async ({ context: { queryClient } }) => {
+    if (!isManagerRole(await queryClient.ensureQueryData(sessionQueries.role()))) {
       throw redirect({ to: '/dashboard' })
     }
   },
+  loader: ({ context: { queryClient } }) =>
+    Promise.all([
+      queryClient.ensureQueryData(memberQueries.list(FIRST_PAGE)),
+      queryClient.ensureQueryData(memberQueries.invitations(FIRST_PAGE)),
+      queryClient.ensureQueryData(groupQueries.options()),
+    ]),
   component: MembersPage,
 })
+
+const FIRST_PAGE: PageParams = { q: '', page: 1 }
+const EMPTY_PAGE = { rows: [], total: 0, page: 1, pageSize: 1 }
 
 type MemberRow = {
   member: { id: string; role: string }
@@ -92,19 +94,19 @@ function CopyLinkButton({ url }: { url: string }) {
 }
 
 function MembersPage() {
-  const { members, invitations, allGroups, role } = Route.useLoaderData()
-  const router = useRouter()
+  const { data: allGroups } = useSuspenseQuery(groupQueries.options())
+  const role = useRole()
   const confirm = useConfirm()
   const { data: session } = useSession()
   const { data: activeOrganization } = authClient.useActiveOrganization()
-  const isManager = role === 'owner' || role === 'admin'
+  const isManager = isManagerRole(role)
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  // Bumped whenever an invite is created (in a sibling component, so the lists below
-  // can't reach it directly) — remounts the list cards to pick up fresh data. Plain
-  // router.invalidate() only refreshes this route's own loaderData, which the cards
-  // only read once at mount into local state, so it doesn't reach them by itself.
-  const [refreshKey, setRefreshKey] = useState(0)
+  const deleteOrganization = useMutation({
+    mutationFn: () => deleteOrganizationFn(),
+    meta: { errorMessage: 'Suppression de la chorale impossible' },
+    // Full reload: every cached query and the session belong to the deleted choir.
+    onSuccess: () => window.location.assign('/'),
+  })
 
   return (
     <div className="w-full space-y-6 p-8">
@@ -116,13 +118,7 @@ function MembersPage() {
         {isManager ? (
           <Dialog
             open={inviteOpen}
-            onOpenChange={(open) => {
-              setInviteOpen(open)
-              if (!open) {
-                router.invalidate()
-                setRefreshKey((k) => k + 1)
-              }
-            }}
+            onOpenChange={setInviteOpen}
           >
             <DialogTrigger asChild>
               <Button>Inviter quelqu'un</Button>
@@ -138,11 +134,7 @@ function MembersPage() {
                 <InviteDialogForm
                   allGroups={allGroups}
                   orgName={activeOrganization?.name}
-                  onClose={() => {
-                    setInviteOpen(false)
-                    router.invalidate()
-                    setRefreshKey((k) => k + 1)
-                  }}
+                  onClose={() => setInviteOpen(false)}
                 />
               ) : null}
             </DialogContent>
@@ -151,16 +143,12 @@ function MembersPage() {
       </header>
 
       <MembersActiveCard
-        key={`members-${refreshKey}`}
-        initial={members}
         allGroups={allGroups}
         isManager={isManager}
         currentUserId={session?.user.id}
       />
 
       <PendingInvitationsCard
-        key={`invitations-${refreshKey}`}
-        initial={invitations}
         isManager={isManager}
         orgName={activeOrganization?.name}
       />
@@ -177,7 +165,7 @@ function MembersPage() {
           <CardContent>
             <Button
               variant="destructive"
-              disabled={deleting}
+              disabled={deleteOrganization.isPending || deleteOrganization.isSuccess}
               onClick={async () => {
                 const ok = await confirm({
                   title: 'Supprimer cette chorale',
@@ -186,15 +174,10 @@ function MembersPage() {
                   confirmLabel: 'Supprimer définitivement',
                 })
                 if (!ok) return
-                setDeleting(true)
-                if (!(await attempt(() => deleteOrganizationFn(), 'Suppression de la chorale impossible'))) {
-                  setDeleting(false)
-                  return
-                }
-                window.location.assign('/')
+                deleteOrganization.mutate()
               }}
             >
-              {deleting ? 'Suppression…' : 'Supprimer cette chorale'}
+              {deleteOrganization.isPending || deleteOrganization.isSuccess ? 'Suppression…' : 'Supprimer cette chorale'}
             </Button>
           </CardContent>
         </Card>
@@ -204,41 +187,20 @@ function MembersPage() {
 }
 
 function MembersActiveCard({
-  initial,
   allGroups,
   isManager,
   currentUserId,
 }: {
-  initial: Page<MemberRow>
   allGroups: Array<{ id: string; name: string }>
   isManager: boolean
   currentUserId: string | undefined
 }) {
-  const [result, setResult] = useState(initial)
-  const [searchInput, setSearchInput] = useState('')
-  const [q, setQ] = useState('')
-  const [page, setPage] = useState(1)
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setQ(searchInput)
-      setPage(1)
-    }, 300)
-    return () => clearTimeout(timeout)
-  }, [searchInput])
-
-  useEffect(() => {
-    let cancelled = false
-    searchMembersFn({ data: { q, page } }).then((res) => {
-      if (!cancelled) setResult(res)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [q, page])
-
+  const { searchInput, setSearchInput, params, setPage } = useSearchPaging()
+  // First page is prefetched by the route loader; later pages keep the previous
+  // results on screen while loading.
+  const result = useQuery(memberQueries.list(params)).data ?? EMPTY_PAGE
+  const page = params.page
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize))
-  const refetch = () => searchMembersFn({ data: { q, page } }).then(setResult)
 
   return (
     <Card>
@@ -270,7 +232,6 @@ function MembersActiveCard({
                 allGroups={allGroups}
                 isManager={isManager}
                 isSelf={row.user.id === currentUserId}
-                onChanged={refetch}
               />
             ))}
             {result.rows.length === 0 ? (
@@ -294,42 +255,24 @@ function MembersActiveCard({
 }
 
 function PendingInvitationsCard({
-  initial,
   isManager,
   orgName,
 }: {
-  initial: Page<InvitationRow>
   isManager: boolean
   orgName: string | undefined
 }) {
   const confirm = useConfirm()
-  const [result, setResult] = useState(initial)
-  const [searchInput, setSearchInput] = useState('')
-  const [q, setQ] = useState('')
-  const [page, setPage] = useState(1)
+  const { searchInput, setSearchInput, params, setPage } = useSearchPaging()
+  const result: Page<InvitationRow> = useQuery(memberQueries.invitations(params)).data ?? EMPTY_PAGE
+  const page = params.page
   const [origin, setOrigin] = useState('')
   useEffect(() => setOrigin(window.location.origin), [])
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setQ(searchInput)
-      setPage(1)
-    }, 300)
-    return () => clearTimeout(timeout)
-  }, [searchInput])
-
-  useEffect(() => {
-    let cancelled = false
-    searchInvitationsFn({ data: { q, page } }).then((res) => {
-      if (!cancelled) setResult(res)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [q, page])
+  const revokeInvite = useMutation({
+    mutationFn: (invitationId: string) => revokeInviteFn({ data: { invitationId } }),
+    meta: { errorMessage: 'Révocation impossible', invalidates: [memberKeys.all] },
+  })
 
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize))
-  const refetch = () => searchInvitationsFn({ data: { q, page } }).then(setResult)
 
   return (
     <Card>
@@ -389,11 +332,7 @@ function PendingInvitationsCard({
                           confirmLabel: 'Révoquer',
                         })
                         if (!ok) return
-                        await attempt(
-                          () => revokeInviteFn({ data: { invitationId: invitation.id } }),
-                          'Révocation impossible',
-                        )
-                        await refetch()
+                        revokeInvite.mutate(invitation.id)
                       }}
                     >
                       Révoquer
@@ -427,18 +366,33 @@ function MemberRow({
   allGroups,
   isManager,
   isSelf,
-  onChanged,
 }: {
   row: MemberRow
   allGroups: Array<{ id: string; name: string }>
   isManager: boolean
   isSelf: boolean
-  onChanged: () => void
 }) {
   const confirm = useConfirm()
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [selected, setSelected] = useState(new Set(row.groups.map((g) => g.id)))
-  const [saving, setSaving] = useState(false)
+  const memberId = row.member.id
+  const queryClient = useQueryClient()
+  const invalidates = [memberKeys.all]
+  const updateRole = useMutation({
+    mutationFn: (role: InviteRole) => updateMemberRoleFn({ data: { memberId, role } }),
+    meta: { errorMessage: 'Modification du rôle impossible', invalidates },
+    // On failure too, so the select shows the actual role again.
+    onError: () => queryClient.invalidateQueries({ queryKey: memberKeys.all }),
+  })
+  const updateGroups = useMutation({
+    mutationFn: (groupIds: Array<string>) => updateMemberGroupsFn({ data: { memberId, groupIds } }),
+    meta: { errorMessage: 'Enregistrement impossible', invalidates },
+    onSuccess: () => setGroupsOpen(false),
+  })
+  const removeMember = useMutation({
+    mutationFn: () => removeMemberFn({ data: { memberId } }),
+    meta: { errorMessage: 'Retrait impossible', invalidates },
+  })
 
   return (
     <TableRow>
@@ -449,14 +403,8 @@ function MemberRow({
           <select
             className="rounded-md border bg-background px-2 py-1 text-sm"
             value={row.member.role}
-            onChange={async (e) => {
-              await attempt(
-                () => updateMemberRoleFn({ data: { memberId: row.member.id, role: e.target.value as InviteRole } }),
-                'Modification du rôle impossible',
-              )
-              // Refresh even on failure so the select shows the actual role again.
-              onChanged()
-            }}
+            disabled={updateRole.isPending}
+            onChange={(e) => updateRole.mutate(e.target.value as InviteRole)}
           >
             <option value="admin">Admin</option>
             <option value="member">Utilisateur</option>
@@ -505,21 +453,8 @@ function MemberRow({
                   <p className="text-sm text-muted-foreground">Aucun groupe créé pour l'instant</p>
                 ) : null}
               </div>
-              <Button
-                disabled={saving}
-                onClick={async () => {
-                  setSaving(true)
-                  const ok = await attempt(
-                    () => updateMemberGroupsFn({ data: { memberId: row.member.id, groupIds: [...selected] } }),
-                    'Enregistrement impossible',
-                  )
-                  setSaving(false)
-                  if (!ok) return
-                  setGroupsOpen(false)
-                  onChanged()
-                }}
-              >
-                {saving ? 'Enregistrement…' : 'Enregistrer'}
+              <Button disabled={updateGroups.isPending} onClick={() => updateGroups.mutate([...selected])}>
+                {updateGroups.isPending ? 'Enregistrement…' : 'Enregistrer'}
               </Button>
             </DialogContent>
           </Dialog>
@@ -537,9 +472,7 @@ function MemberRow({
                   confirmLabel: 'Retirer',
                 })
                 if (!ok) return
-                if (!(await attempt(() => removeMemberFn({ data: { memberId: row.member.id } }), 'Retrait impossible')))
-                  return
-                onChanged()
+                removeMember.mutate()
               }}
             >
               Retirer
@@ -589,17 +522,10 @@ function InviteDialogForm({
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<InviteRole>('member')
   const [groupIds, setGroupIds] = useState<Set<string>>(new Set())
-  const [serverError, setServerError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
   const [inviteLink, setInviteLink] = useState<string | null>(null)
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!email.trim()) return
-    setServerError(null)
-    setSubmitting(true)
-    try {
-      const created = await createInviteFn({
+  const createInvite = useMutation({
+    mutationFn: () =>
+      createInviteFn({
         data: {
           email: email.trim(),
           firstName: firstName.trim() || null,
@@ -607,15 +533,19 @@ function InviteDialogForm({
           role,
           groupIds: [...groupIds],
         },
-      })
+      }),
+    meta: { invalidates: [memberKeys.all] },
+    onSuccess: async (created) => {
       const link = buildInviteLink(window.location.origin, created.id, created.secret, email.trim(), orgName)
       setInviteLink(link)
       await copyInviteLink(link)
-    } catch {
-      setServerError('Invitation impossible (email déjà invité ou déjà membre ?)')
-    } finally {
-      setSubmitting(false)
-    }
+    },
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!email.trim()) return
+    createInvite.mutate()
   }
 
   if (inviteLink) {
@@ -693,9 +623,11 @@ function InviteDialogForm({
           </div>
         </div>
       ) : null}
-      {serverError ? <p className="text-sm text-destructive">{serverError}</p> : null}
-      <Button type="submit" className="w-full" disabled={submitting}>
-        {submitting ? 'Création…' : "Générer le lien d'invitation"}
+      {createInvite.isError ? (
+        <p className="text-sm text-destructive">Invitation impossible (email déjà invité ou déjà membre ?)</p>
+      ) : null}
+      <Button type="submit" className="w-full" disabled={createInvite.isPending}>
+        {createInvite.isPending ? 'Création…' : "Générer le lien d'invitation"}
       </Button>
     </form>
   )

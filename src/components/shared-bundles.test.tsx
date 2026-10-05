@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react'
+import { screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react'
 import { PDFDocument } from 'pdf-lib'
 import type { SharedAsset, SharedItem } from '@/domain/share-bundles'
 import { SharedBundles } from './shared-bundles'
+import { renderWithQuery } from '@/test/render'
 
 const getPublicAssetUrlsFn = vi.hoisted(() => vi.fn())
 vi.mock('@/server/shareLinks', () => ({ getPublicAssetUrlsFn }))
@@ -42,14 +43,14 @@ afterEach(() => {
 
 describe('SharedBundles', () => {
   it('renders nothing without shared audio or PDF', () => {
-    const { container } = render(
+    const { container } = renderWithQuery(
       <SharedBundles token="t" items={[item('Vide', [asset('x', { status: 'uploading' })])]} />,
     )
     expect(container.innerHTML).toBe('')
   })
 
   it('shows one block per audience, with player and PDF button only when relevant', () => {
-    render(
+    renderWithQuery(
       <SharedBundles
         token="t"
         items={[
@@ -72,7 +73,7 @@ describe('SharedBundles', () => {
   })
 
   it('chains tracks and loops back to the first one', () => {
-    render(<SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
+    renderWithQuery(<SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
     expect(audio().getAttribute('src')).toBe('https://s3.test/a1')
     expect(screen.getByText(/1 \/ 2 · Un/)).toBeTruthy()
 
@@ -85,12 +86,12 @@ describe('SharedBundles', () => {
   })
 
   it('loops a single track natively', () => {
-    render(<SharedBundles token="t" items={[item('Seul', [asset('a1')])]} />)
+    renderWithQuery(<SharedBundles token="t" items={[item('Seul', [asset('a1')])]} />)
     expect(audio().loop).toBe(true)
   })
 
   it('jumps to a track from the list and with previous/next', () => {
-    render(
+    renderWithQuery(
       <SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')]), item('Trois', [asset('a3')])]} />,
     )
     fireEvent.click(screen.getByRole('button', { name: /Trois/ }))
@@ -103,7 +104,7 @@ describe('SharedBundles', () => {
 
   it('refreshes expired URLs once, then skips a broken track', async () => {
     getPublicAssetUrlsFn.mockResolvedValue({ a1: 'https://s3.test/a1-fresh', a2: 'https://s3.test/a2-fresh' })
-    render(<SharedBundles token="tok" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
+    renderWithQuery(<SharedBundles token="tok" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
 
     fireEvent.error(audio())
     await waitFor(() => expect(audio().getAttribute('src')).toBe('https://s3.test/a1-fresh'))
@@ -132,7 +133,7 @@ describe('SharedBundles', () => {
     getPublicAssetUrlsFn.mockResolvedValue({ p1: 'https://fresh/p1', p2: 'https://fresh/p2' })
 
     const score = { kind: 'score' as const, mimeType: 'application/pdf' }
-    render(
+    renderWithQuery(
       <SharedBundles token="tok" items={[item('Un', [asset('p1', score)]), item('Deux', [asset('p2', score)])]} />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Partitions (2 PDF)' }))
@@ -145,7 +146,7 @@ describe('SharedBundles', () => {
   })
 
   it('pauses the other playlists when one starts', () => {
-    render(
+    renderWithQuery(
       <SharedBundles
         token="t"
         items={[item('Ave', [asset('a1'), asset('a2', { groups: [basse] })])]}
@@ -169,7 +170,7 @@ describe('SharedBundles', () => {
     Object.defineProperty(navigator, 'mediaSession', { value: mediaSession, configurable: true })
     vi.stubGlobal('MediaMetadata', class { constructor(public init: { title: string }) {} })
 
-    render(
+    renderWithQuery(
       <SharedBundles
         token="t"
         items={[
