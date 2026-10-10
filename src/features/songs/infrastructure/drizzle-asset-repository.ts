@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { and, eq, inArray, lt } from 'drizzle-orm'
+import { and, asc, eq, inArray, lt } from 'drizzle-orm'
 import { Database } from '@/shared/infrastructure/db/database'
 import { NotFoundError } from '@/shared/domain/errors'
 import { group } from '@/features/groups/infrastructure/schema'
@@ -9,7 +9,10 @@ import { asset, assetGroup, song } from './schema'
 export const DrizzleAssetRepository = Layer.effect(
   AssetRepository,
   Effect.map(Database, (db) => ({
-    listForSong: (songId) => Effect.promise(() => db.select().from(asset).where(eq(asset.songId, songId))),
+    listForSong: (songId) =>
+      Effect.promise(() =>
+        db.select().from(asset).where(eq(asset.songId, songId)).orderBy(asc(asset.createdAt), asc(asset.id)),
+      ),
 
     groupsForSong: (songId) =>
       Effect.promise(() =>

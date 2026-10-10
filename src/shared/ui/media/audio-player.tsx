@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import { Button } from '@/shared/ui/primitives/button'
+import { useStableUrl } from './use-stable-url'
+import { pauseOtherPlayers, registerPlayer } from './exclusive-playback'
 
-export function AudioPlayer({ url }: { url: string }) {
+export function AudioPlayer({ url: latestUrl }: { url: string }) {
+  const url = useStableUrl(latestUrl)
   const containerRef = useRef<HTMLDivElement>(null)
   const waveSurferRef = useRef<WaveSurfer | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -25,9 +28,14 @@ export function AudioPlayer({ url }: { url: string }) {
       url,
     })
     waveSurferRef.current = waveSurfer
+    const player = { pause: () => waveSurfer.pause() }
+    const unregister = registerPlayer(player)
 
     waveSurfer.on('ready', () => setReady(true))
-    waveSurfer.on('play', () => setPlaying(true))
+    waveSurfer.on('play', () => {
+      setPlaying(true)
+      pauseOtherPlayers(player)
+    })
     waveSurfer.on('pause', () => setPlaying(false))
     waveSurfer.on('finish', () => setPlaying(false))
     // Most browsers can't decode AIFF (and some other legacy formats) — fall
@@ -35,6 +43,7 @@ export function AudioPlayer({ url }: { url: string }) {
     waveSurfer.on('error', () => setError(true))
 
     return () => {
+      unregister()
       waveSurfer.destroy()
       waveSurferRef.current = null
     }
@@ -46,7 +55,7 @@ export function AudioPlayer({ url }: { url: string }) {
         <p className="text-sm text-destructive">
           Ce format audio n'est pas pris en charge par votre navigateur pour l'écoute.
         </p>
-        <a href={url} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:underline">
+        <a href={latestUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:underline">
           Télécharger le fichier
         </a>
       </div>

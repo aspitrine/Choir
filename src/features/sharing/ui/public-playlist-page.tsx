@@ -42,9 +42,10 @@ export function PublicPlaylistPage() {
       </header>
 
       <div className="divide-y rounded-md border">
-        {data.items.map((item) => (
+        {data.items.map((item, i) => (
           <button
-            key={item.song.id}
+            // A song can be in the playlist twice (encore).
+            key={`${item.song.id}-${i}`}
             className="flex w-full flex-col px-4 py-3 text-left text-sm hover:bg-accent"
             onClick={() => setSelected(item)}
           >

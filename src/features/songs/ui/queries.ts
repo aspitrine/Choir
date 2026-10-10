@@ -16,8 +16,10 @@ export const songQueries = {
     queryOptions({
       queryKey: songKeys.detail(songId),
       queryFn: () => getSongFn({ data: { songId } }),
-      // Presigned file URLs expire after 15 minutes.
+      // Presigned file URLs expire after 15 minutes: renew them well before, also
+      // while the page stays in the foreground.
       staleTime: 5 * 60 * 1000,
+      refetchInterval: 5 * 60 * 1000,
     }),
 }
 

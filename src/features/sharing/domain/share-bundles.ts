@@ -13,7 +13,14 @@ export type SharedItem = {
   assets: Array<SharedAsset>
 }
 
-export type BundleFile = { assetId: string; url: string; title: string; label: string | null }
+export type BundleFile = {
+  /** Unique within a bundle: a song can appear twice in a playlist (encore). */
+  key: string
+  assetId: string
+  url: string
+  title: string
+  label: string | null
+}
 
 export type Bundle = {
   key: string
@@ -34,6 +41,7 @@ export function formatAudience(names: Array<string>) {
 // Bundles only exist when they hold at least one playable track or PDF.
 export function buildBundles(items: Array<SharedItem>): Array<Bundle> {
   const bundles = new Map<string, Bundle>()
+  const occurrences = new Map<string, number>()
   for (const item of items) {
     for (const a of item.assets) {
       if (a.status !== 'ready') continue
@@ -56,7 +64,9 @@ export function buildBundles(items: Array<SharedItem>): Array<Bundle> {
         }
         bundles.set(key, bundle)
       }
-      const file = { assetId: a.id, url: a.url, title: item.song.title, label: a.label }
+      const occurrence = occurrences.get(a.id) ?? 0
+      occurrences.set(a.id, occurrence + 1)
+      const file = { key: `${a.id}#${occurrence}`, assetId: a.id, url: a.url, title: item.song.title, label: a.label }
       if (isTrack) bundle.tracks.push(file)
       else bundle.scores.push(file)
     }

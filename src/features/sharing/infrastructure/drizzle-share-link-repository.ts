@@ -98,6 +98,8 @@ export const DrizzleShareLinkRepository = Layer.effect(
                 .from(asset)
                 // Uploads still in flight (or failed) have no object to serve.
                 .where(and(inArray(asset.songId, songIds), eq(asset.status, 'ready')))
+                // Stable across refetches: the playlist player lists tracks in this order.
+                .orderBy(asc(asset.createdAt), asc(asset.id))
             : []
         const tags =
           assets.length > 0

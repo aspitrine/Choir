@@ -2,12 +2,14 @@ import { useEffect, useState, type ComponentType } from 'react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import { Button } from '@/shared/ui/primitives/button'
+import { useStableUrl } from './use-stable-url'
 
 // react-pdf (pdfjs-dist) touches browser-only globals (DOMMatrix) at module
 // load — importing it statically crashes SSR. Load it only on the client.
 let ReactPdf: typeof import('react-pdf') | null = null
 
-export function PdfViewer({ url }: { url: string }) {
+export function PdfViewer({ url: latestUrl }: { url: string }) {
+  const url = useStableUrl(latestUrl)
   const [Document, setDocument] = useState<ComponentType<any> | null>(null)
   const [Page, setPage] = useState<ComponentType<any> | null>(null)
   const [pageNum, setPageNum] = useState(1)

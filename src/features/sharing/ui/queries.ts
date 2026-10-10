@@ -11,6 +11,8 @@ export const publicQueries = {
       queryKey: publicKeys.playlist(token),
       queryFn: () => getPublicPlaylistFn({ data: { token } }),
       staleTime: PRESIGNED_URL_FRESHNESS,
+      // Also while the page stays in the foreground (no focus event to refetch on).
+      refetchInterval: PRESIGNED_URL_FRESHNESS,
       // An unknown or revoked token won't start working on retry.
       retry: false,
     }),
