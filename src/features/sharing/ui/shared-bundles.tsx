@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { toast } from 'sonner'
 import { Button } from '@/shared/ui/primitives/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/shared/ui/primitives/dialog'
@@ -35,34 +36,29 @@ function fileTitle(f: BundleFile) {
   return f.label ? `${f.title} — ${f.label}` : f.title
 }
 
-const URL_REFRESH_COOLDOWN = 60 * 1000
+/** Stable address of a shared file: the server redirects to a fresh presigned URL. */
+export function publicFileUrl(token: string, assetId: string) {
+  return `/api/public/${encodeURIComponent(token)}/files/${encodeURIComponent(assetId)}`
+}
 
 // Plays every track in order and wraps back to the first one, forever.
 function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<BundleFile> }) {
-  const queryClient = useQueryClient()
   const audioRef = useRef<HTMLAudioElement>(null)
   // Followed by key, not position: a refetch may reorder or drop tracks while
   // one is playing.
   const [currentKey, setCurrentKey] = useState(tracks[0]!.key)
-  const [freshUrls, setFreshUrls] = useState<Record<string, string>>({})
   const [failed, setFailed] = useState<Set<string>>(new Set())
-  // Keep playing across src changes (next track, refreshed URL) only if the
-  // user had playback running.
+  // Keep playing across track changes only if the user had playback running.
   const wantPlay = useRef(false)
-  const refreshedAt = useRef(new Map<string, number>())
 
   const found = tracks.findIndex((t) => t.key === currentKey)
   const index = found === -1 ? 0 : found
   const current = tracks[index]!
-  const latestUrl = freshUrls[current.assetId] ?? current.url
-  // The playlist refetch renews every presigned URL: switching the loaded
-  // track's src would restart it mid-song, so only take the renewed URL when
-  // moving to another track (or after an explicit refresh).
-  const [loaded, setLoaded] = useState({ key: current.key, url: latestUrl })
-  if (loaded.key !== current.key) setLoaded({ key: current.key, url: latestUrl })
-  const src = loaded.key === current.key ? loaded.url : latestUrl
+  // Never expires, and stays the same when the playlist refetch renews the
+  // presigned URLs: the loaded track is never reloaded under the listener.
+  const src = publicFileUrl(token, current.assetId)
 
-  // Read by callbacks that outlive this render (media session, async onError).
+  // Read by callbacks that outlive this render (media session).
   const latest = useRef({ tracks, index })
   latest.current = { tracks, index }
   const goTo = (next: number) => {
@@ -70,6 +66,15 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
     setCurrentKey(tracks[((next % tracks.length) + tracks.length) % tracks.length]!.key)
   }
   const step = (delta: number) => goTo(latest.current.index + delta)
+
+  // Moves on and starts the next track within the calling media event: phones
+  // only let a page start audio from there while the screen is locked or the
+  // tab is in the background — a play() from a later React effect is refused.
+  const playStep = (delta: number) => {
+    wantPlay.current = true
+    flushSync(() => step(delta))
+    audioRef.current?.play().catch(() => {})
+  }
 
   const [player] = useState(() => ({ pause: () => audioRef.current?.pause() }))
   useEffect(() => registerPlayer(player), [player])
@@ -84,10 +89,7 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
   const claimMediaSession = () => {
     if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return
     navigator.mediaSession.metadata = new MediaMetadata({ title: fileTitle(current) })
-    const skip = (delta: number) => () => {
-      wantPlay.current = true
-      step(delta)
-    }
+    const skip = (delta: number) => () => playStep(delta)
     navigator.mediaSession.setActionHandler('nexttrack', tracks.length > 1 ? skip(1) : null)
     navigator.mediaSession.setActionHandler('previoustrack', tracks.length > 1 ? skip(-1) : null)
   }
@@ -98,37 +100,18 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
     claimMediaSession()
   }
 
-  // A track that plays again (network back, refreshed URL) is no longer broken.
+  // A track that plays again (network back) is no longer broken.
   const onPlaying = () => {
     if (failed.has(current.assetId)) setFailed((prev) => new Set([...prev].filter((id) => id !== current.assetId)))
   }
 
-  const onError = async () => {
-    const failedKey = current.key
-    const failedId = current.assetId
-    // Presigned URLs expire (a looping playlist outlives them): fetch fresh ones,
-    // unless this track was just refreshed and still fails — then it's broken.
-    const lastRefresh = refreshedAt.current.get(failedId)
-    if (lastRefresh === undefined || Date.now() - lastRefresh > URL_REFRESH_COOLDOWN) {
-      refreshedAt.current.set(failedId, Date.now())
-      try {
-        const urls = await queryClient.fetchQuery(
-          publicQueries.assetUrls(
-            token,
-            tracks.map((t) => t.assetId),
-          ),
-        )
-        setFreshUrls((prev) => ({ ...prev, ...urls }))
-        const url = urls[failedId]
-        if (url) setLoaded({ key: failedKey, url })
-        return
-      } catch {
-        // fall through to skipping the track
-      }
-    }
-    const nextFailed = new Set(failed).add(failedId)
+  // The URL can't expire, so an error means a broken file or no network: skip
+  // it, unless every track failed.
+  const onError = () => {
+    const nextFailed = new Set(failed).add(current.assetId)
     setFailed(nextFailed)
-    if (nextFailed.size < latest.current.tracks.length) step(1)
+    if (!wantPlay.current) return
+    if (nextFailed.size < new Set(tracks.map((t) => t.assetId)).size) playStep(1)
     else wantPlay.current = false
   }
 
@@ -144,10 +127,7 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
         onPlay={onPlay}
         onPlaying={onPlaying}
         onPause={() => (wantPlay.current = false)}
-        onEnded={() => {
-          wantPlay.current = true
-          step(1)
-        }}
+        onEnded={() => playStep(1)}
         onError={onError}
       />
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">

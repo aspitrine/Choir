@@ -99,3 +99,16 @@ export const getPublicAssetUrls = (token: string, assetIds: ReadonlyArray<string
     )
     return Object.fromEntries(entries) as Record<string, string>
   })
+
+/**
+ * A presigned URL for one file visible through this token. Backs a stable
+ * per-file address the public player can keep for hours: each request (incl.
+ * the range requests of a seek) gets a URL signed just now.
+ */
+export const getPublicAssetUrl = (token: string, assetId: string) =>
+  Effect.gen(function* () {
+    const urls = yield* getPublicAssetUrls(token, [assetId])
+    const url = urls[assetId]
+    if (!url) return yield* Effect.fail(new NotFoundError({ entity: 'asset', id: assetId }))
+    return url
+  })

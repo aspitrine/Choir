@@ -21,6 +21,7 @@ import { Route as AuthedPlaylistsPlaylistIdRouteImport } from './routes/_authed/
 import { Route as AuthedSongsIndexRouteImport } from './routes/_authed/songs/index'
 import { Route as AuthedSongsSongIdRouteImport } from './routes/_authed/songs/$songId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiPublicTokenFilesAssetIdRouteImport } from './routes/api/public/$token/files/$assetId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -83,6 +84,12 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicTokenFilesAssetIdRoute =
+  ApiPublicTokenFilesAssetIdRouteImport.update({
+    id: '/api/public/$token/files/$assetId',
+    path: '/api/public/$token/files/$assetId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -96,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/members/': typeof AuthedMembersIndexRoute
   '/playlists/': typeof AuthedPlaylistsIndexRoute
   '/songs/': typeof AuthedSongsIndexRoute
+  '/api/public/$token/files/$assetId': typeof ApiPublicTokenFilesAssetIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -109,6 +117,7 @@ export interface FileRoutesByTo {
   '/members': typeof AuthedMembersIndexRoute
   '/playlists': typeof AuthedPlaylistsIndexRoute
   '/songs': typeof AuthedSongsIndexRoute
+  '/api/public/$token/files/$assetId': typeof ApiPublicTokenFilesAssetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -124,6 +133,7 @@ export interface FileRoutesById {
   '/_authed/members/': typeof AuthedMembersIndexRoute
   '/_authed/playlists/': typeof AuthedPlaylistsIndexRoute
   '/_authed/songs/': typeof AuthedSongsIndexRoute
+  '/api/public/$token/files/$assetId': typeof ApiPublicTokenFilesAssetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -139,6 +149,7 @@ export interface FileRouteTypes {
     | '/members/'
     | '/playlists/'
     | '/songs/'
+    | '/api/public/$token/files/$assetId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -152,6 +163,7 @@ export interface FileRouteTypes {
     | '/members'
     | '/playlists'
     | '/songs'
+    | '/api/public/$token/files/$assetId'
   id:
     | '__root__'
     | '/'
@@ -166,6 +178,7 @@ export interface FileRouteTypes {
     | '/_authed/members/'
     | '/_authed/playlists/'
     | '/_authed/songs/'
+    | '/api/public/$token/files/$assetId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -174,6 +187,7 @@ export interface RootRouteChildren {
   AcceptInviteInvitationIdRoute: typeof AcceptInviteInvitationIdRoute
   STokenRoute: typeof STokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiPublicTokenFilesAssetIdRoute: typeof ApiPublicTokenFilesAssetIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -262,6 +276,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/$token/files/$assetId': {
+      id: '/api/public/$token/files/$assetId'
+      path: '/api/public/$token/files/$assetId'
+      fullPath: '/api/public/$token/files/$assetId'
+      preLoaderRoute: typeof ApiPublicTokenFilesAssetIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -294,6 +315,7 @@ const rootRouteChildren: RootRouteChildren = {
   AcceptInviteInvitationIdRoute: AcceptInviteInvitationIdRoute,
   STokenRoute: STokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiPublicTokenFilesAssetIdRoute: ApiPublicTokenFilesAssetIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

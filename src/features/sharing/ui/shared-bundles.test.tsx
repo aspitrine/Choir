@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react'
+import { screen, fireEvent, cleanup, within, act } from '@testing-library/react'
 import { PDFDocument } from 'pdf-lib'
 import { QueryClientProvider } from '@tanstack/react-query'
 import type { SharedAsset, SharedItem } from '@/features/sharing/domain/share-bundles'
@@ -31,6 +31,7 @@ const asset = (id: string, overrides: Partial<SharedAsset> = {}): SharedAsset =>
 const item = (title: string, assets: Array<SharedAsset>): SharedItem => ({ song: { id: title, title }, assets })
 
 const audio = () => document.querySelector('audio')!
+const src = (id: string) => `/api/public/t/files/${id}`
 
 beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
@@ -75,15 +76,15 @@ describe('SharedBundles', () => {
 
   it('chains tracks and loops back to the first one', () => {
     renderWithQuery(<SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a1')
+    expect(audio().getAttribute('src')).toBe(src('a1'))
     expect(screen.getByText(/1 \/ 2 · Un/)).toBeTruthy()
 
     fireEvent.ended(audio())
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a2')
+    expect(audio().getAttribute('src')).toBe(src('a2'))
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled()
 
     fireEvent.ended(audio())
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a1')
+    expect(audio().getAttribute('src')).toBe(src('a1'))
   })
 
   it('keeps the loaded track when the playlist refetch renews its URLs', () => {
@@ -101,12 +102,19 @@ describe('SharedBundles', () => {
         <SharedBundles token="t" items={items('v2')} />
       </QueryClientProvider>,
     )
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a1-v1')
+    expect(audio().getAttribute('src')).toBe(src('a1'))
     expect(play).not.toHaveBeenCalled()
+  })
 
-    // The next track picks up the renewed URL.
-    fireEvent.ended(audio())
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a2-v2')
+  it('starts the next track within the ended event, as locked phones require', () => {
+    renderWithQuery(<SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
+    const startedOn: Array<string | null> = []
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(function (this: HTMLMediaElement) {
+      startedOn.push(this.getAttribute('src'))
+      return Promise.resolve()
+    })
+    audio().dispatchEvent(new Event('ended'))
+    expect(startedOn[0]).toBe(src('a2'))
   })
 
   it('plays through a song that appears twice in the playlist', () => {
@@ -120,7 +128,7 @@ describe('SharedBundles', () => {
     fireEvent.ended(audio())
     expect(screen.getByText(/3 \/ 4 · Un/)).toBeTruthy()
     fireEvent.ended(audio())
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a3')
+    expect(audio().getAttribute('src')).toBe(src('a3'))
   })
 
   it('replays the same file when it comes twice in a row', () => {
@@ -140,43 +148,29 @@ describe('SharedBundles', () => {
       <SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />,
     )
     fireEvent.ended(audio())
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a2')
+    expect(audio().getAttribute('src')).toBe(src('a2'))
 
     rerender(
       <QueryClientProvider client={queryClient}>
         <SharedBundles token="t" items={[item('Deux', [asset('a2')]), item('Un', [asset('a1')])]} />
       </QueryClientProvider>,
     )
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a2')
+    expect(audio().getAttribute('src')).toBe(src('a2'))
     expect(screen.getByText(/1 \/ 2 · Deux/)).toBeTruthy()
   })
 
-  it('un-strikes a skipped track once it plays again', async () => {
-    getPublicAssetUrlsFn.mockRejectedValue(new Error('offline'))
+  it('un-strikes a skipped track once it plays again', () => {
     renderWithQuery(<SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
     const entry = () => screen.getByRole('button', { name: /Un/ })
 
+    fireEvent.play(audio())
     fireEvent.error(audio())
-    await waitFor(() => expect(entry().className).toContain('line-through'))
+    expect(entry().className).toContain('line-through')
+    expect(audio().getAttribute('src')).toBe(src('a2'))
 
     fireEvent.click(entry())
     fireEvent.playing(audio())
     expect(entry().className).not.toContain('line-through')
-  })
-
-  it('refreshes a track URL again once the previous refresh may have expired', async () => {
-    const now = vi.spyOn(Date, 'now').mockReturnValue(0)
-    getPublicAssetUrlsFn.mockResolvedValueOnce({ a1: 'https://s3.test/a1-r1', a2: 'https://s3.test/a2-r1' })
-    getPublicAssetUrlsFn.mockResolvedValueOnce({ a1: 'https://s3.test/a1-r2', a2: 'https://s3.test/a2-r2' })
-    renderWithQuery(<SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
-
-    fireEvent.error(audio())
-    await waitFor(() => expect(audio().getAttribute('src')).toBe('https://s3.test/a1-r1'))
-
-    now.mockReturnValue(20 * 60 * 1000)
-    fireEvent.error(audio())
-    await waitFor(() => expect(audio().getAttribute('src')).toBe('https://s3.test/a1-r2'))
-    expect(getPublicAssetUrlsFn).toHaveBeenCalledTimes(2)
   })
 
   it('loops a single track natively', () => {
@@ -189,24 +183,20 @@ describe('SharedBundles', () => {
       <SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')]), item('Trois', [asset('a3')])]} />,
     )
     fireEvent.click(screen.getByRole('button', { name: /Trois/ }))
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a3')
+    expect(audio().getAttribute('src')).toBe(src('a3'))
     fireEvent.click(screen.getByRole('button', { name: 'Suivant' }))
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a1')
+    expect(audio().getAttribute('src')).toBe(src('a1'))
     fireEvent.click(screen.getByRole('button', { name: 'Précédent' }))
-    expect(audio().getAttribute('src')).toBe('https://s3.test/a3')
+    expect(audio().getAttribute('src')).toBe(src('a3'))
   })
 
-  it('refreshes expired URLs once, then skips a broken track', async () => {
-    getPublicAssetUrlsFn.mockResolvedValue({ a1: 'https://s3.test/a1-fresh', a2: 'https://s3.test/a2-fresh' })
-    renderWithQuery(<SharedBundles token="tok" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
-
+  it('stops instead of cycling when every track fails', () => {
+    renderWithQuery(<SharedBundles token="t" items={[item('Un', [asset('a1')]), item('Deux', [asset('a2')])]} />)
+    fireEvent.play(audio())
     fireEvent.error(audio())
-    await waitFor(() => expect(audio().getAttribute('src')).toBe('https://s3.test/a1-fresh'))
-    expect(getPublicAssetUrlsFn).toHaveBeenCalledWith({ data: { token: 'tok', assetIds: ['a1', 'a2'] } })
-
     fireEvent.error(audio())
-    await waitFor(() => expect(audio().getAttribute('src')).toBe('https://s3.test/a2-fresh'))
-    expect(getPublicAssetUrlsFn).toHaveBeenCalledTimes(1)
+    expect(audio().getAttribute('src')).toBe(src('a2'))
+    expect(screen.getAllByRole('button', { name: /Un|Deux/ }).every((b) => b.className.includes('line-through'))).toBe(true)
   })
 
   it('merges every PDF of a bundle into one document', async () => {
@@ -278,8 +268,8 @@ describe('SharedBundles', () => {
     expect((mediaSession.metadata as { init: { title: string } }).init.title).toBe('Un')
 
     act(() => handlers.get('nexttrack')!())
-    expect(everyone!.getAttribute('src')).toBe('https://s3.test/a2')
-    expect(bass!.getAttribute('src')).toBe('https://s3.test/b1')
+    expect(everyone!.getAttribute('src')).toBe(src('a2'))
+    expect(bass!.getAttribute('src')).toBe(src('b1'))
 
     // @ts-expect-error cleanup of the test-only property
     delete navigator.mediaSession

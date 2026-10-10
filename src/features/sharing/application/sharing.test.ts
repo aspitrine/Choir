@@ -7,6 +7,7 @@ import { song } from '@/features/songs/infrastructure/schema'
 import { shareLink } from '../infrastructure/schema'
 import {
   createShareLink,
+  getPublicAssetUrl,
   getPublicAssetUrls,
   getPublicPlaylist,
   listShareLinks,
@@ -135,5 +136,15 @@ describe('public access', () => {
     const token = (await create(actor, playlist.id, [groups.alto.id])).token
     const urls = await run(layer, getPublicAssetUrls(token, [assets.alto.id, assets.basse.id, 'unknown']))
     expect(urls).toEqual({ [assets.alto.id]: `https://s3.test/get/${assets.alto.storageKey}` })
+  })
+
+  it('signs one file only if visible through the token', async () => {
+    const { actor, playlist, assets, groups } = await choir()
+    const token = (await create(actor, playlist.id, [groups.alto.id])).token
+    expect(await run(layer, getPublicAssetUrl(token, assets.alto.id))).toBe(
+      `https://s3.test/get/${assets.alto.storageKey}`,
+    )
+    expect(await fail(layer, getPublicAssetUrl(token, assets.basse.id))).toBeInstanceOf(NotFoundError)
+    expect(await fail(layer, getPublicAssetUrl('nope', assets.alto.id))).toBeInstanceOf(NotFoundError)
   })
 })
