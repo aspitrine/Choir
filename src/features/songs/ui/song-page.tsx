@@ -131,6 +131,7 @@ export function SongDetailPage() {
                   key={a.id}
                   asset={a as AssetWithGroups}
                   songId={song.id}
+                  songTitle={song.title}
                   allGroups={allGroups}
                   isManager={isManager}
                 />
@@ -153,15 +154,18 @@ export function SongDetailPage() {
 function AssetRow({
   asset,
   songId,
+  songTitle,
   allGroups,
   isManager,
 }: {
   asset: AssetWithGroups
   songId: string
+  songTitle: string
   allGroups: Array<{ id: string; name: string }>
   isManager: boolean
 }) {
   const confirm = useConfirm()
+  const media = { source: 'song_page', songId, songTitle, assetId: asset.id, assetLabel: asset.label }
   const [open, setOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [selected, setSelected] = useState(new Set(asset.groups.map((g) => g.id)))
@@ -247,9 +251,9 @@ function AssetRow({
             </DialogHeader>
             {asset.url ? (
               asset.kind === 'score' ? (
-                <PdfViewer url={asset.url} />
+                <PdfViewer url={asset.url} media={media} />
               ) : (
-                <AudioPlayer url={asset.url} />
+                <AudioPlayer url={asset.url} media={media} />
               )
             ) : null}
           </DialogContent>

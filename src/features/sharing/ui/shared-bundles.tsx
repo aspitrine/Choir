@@ -5,6 +5,8 @@ import { Button } from '@/shared/ui/primitives/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/shared/ui/primitives/dialog'
 import { PdfViewer } from '@/shared/ui/media/pdf-viewer'
 import { pauseOtherPlayers, registerPlayer } from '@/shared/ui/media/exclusive-playback'
+import { createListenTracker, isAtEnd } from '@/shared/ui/media/media-analytics'
+import { track } from '@/shared/ui/lib/analytics'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { publicQueries } from '@/features/sharing/ui/queries'
 import { mergePdfs, NoPagesError } from '@/features/sharing/ui/merge-pdfs'
@@ -79,6 +81,16 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
   const [player] = useState(() => ({ pause: () => audioRef.current?.pause() }))
   useEffect(() => registerPlayer(player), [player])
 
+  const [listening] = useState(() => createListenTracker())
+  useEffect(() => {
+    const leavePage = () => listening.stop()
+    window.addEventListener('pagehide', leavePage)
+    return () => {
+      window.removeEventListener('pagehide', leavePage)
+      listening.stop()
+    }
+  }, [listening])
+
   // Keyed on the track too: the same file twice in a row keeps the same src.
   useEffect(() => {
     if (wantPlay.current) audioRef.current?.play().catch(() => {})
@@ -98,6 +110,17 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
     wantPlay.current = true
     pauseOtherPlayers(player)
     claimMediaSession()
+    listening.play(
+      { source: 'shared_bundle', songTitle: current.title, assetId: current.assetId, assetLabel: current.label },
+      audioRef.current?.currentTime ?? 0,
+    )
+  }
+
+  // The media fires `pause` right before `ended`: tell an end from a pause there.
+  const onPause = () => {
+    wantPlay.current = false
+    const audio = audioRef.current
+    listening.stop(audio ? isAtEnd(audio.currentTime, audio.duration) : false)
   }
 
   // A track that plays again (network back) is no longer broken.
@@ -126,7 +149,8 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
         className="w-full"
         onPlay={onPlay}
         onPlaying={onPlaying}
-        onPause={() => (wantPlay.current = false)}
+        onPause={onPause}
+        onTimeUpdate={(e) => listening.progress(e.currentTarget.currentTime)}
         onEnded={() => playStep(1)}
         onError={onError}
       />
@@ -200,6 +224,7 @@ function MergedPdfButton({
     onSuccess: ({ bytes, pages }) => {
       const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
       setMerged({ url: URL.createObjectURL(blob), pages })
+      track('scores_merged', { audience, score_count: scores.length, pages })
     },
     onError: (error) =>
       toast.error(error instanceof NoPagesError ? 'Aucune page à afficher' : 'Impossible de fusionner les partitions'),
@@ -225,6 +250,9 @@ function MergedPdfButton({
               <a
                 href={merged.url}
                 download={`Partitions - ${audience}.pdf`}
+                onClick={() =>
+                  track('file_download', { kind: 'merged_scores', source: 'shared_bundle', audience, score_count: scores.length })
+                }
                 className="inline-block text-xs text-muted-foreground hover:underline"
               >
                 Télécharger

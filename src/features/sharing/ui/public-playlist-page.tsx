@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/shared/ui/primitives/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/primitives/dialog'
 import { PdfViewer } from '@/shared/ui/media/pdf-viewer'
@@ -7,6 +7,8 @@ import { SharedBundles } from '@/features/sharing/ui/shared-bundles'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { publicQueries } from '@/features/sharing/ui/queries'
 import { getRouteApi } from '@tanstack/react-router'
+import { track } from '@/shared/ui/lib/analytics'
+import { trackDownload, type MediaContext } from '@/shared/ui/media/media-analytics'
 
 const routeApi = getRouteApi('/s/$token')
 
@@ -32,6 +34,25 @@ export function PublicPlaylistPage() {
   const { data } = useSuspenseQuery(publicQueries.playlist(token))
   const [selected, setSelected] = useState<PlaylistItem | null>(null)
 
+  // Once per visit, not on every refetch of the presigned URLs.
+  useEffect(() => {
+    track('shared_playlist_view', { playlist_name: data.playlist.name, song_count: data.items.length })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  const open = (item: PlaylistItem) => {
+    setSelected(item)
+    track('shared_song_open', { playlist_name: data.playlist.name, song_id: item.song.id, song_title: item.song.title })
+  }
+
+  const mediaOf = (item: PlaylistItem, a: PlaylistAsset): MediaContext => ({
+    source: 'shared_playlist',
+    songId: item.song.id,
+    songTitle: item.song.title,
+    assetId: a.id,
+    assetLabel: a.label,
+  })
+
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-8">
       <header>
@@ -47,7 +68,7 @@ export function PublicPlaylistPage() {
             // A song can be in the playlist twice (encore).
             key={`${item.song.id}-${i}`}
             className="flex w-full flex-col px-4 py-3 text-left text-sm hover:bg-accent"
-            onClick={() => setSelected(item)}
+            onClick={() => open(item)}
           >
             <span className="font-medium">{item.song.title}</span>
             {item.song.composer || item.song.key || item.song.tempo ? (
@@ -89,12 +110,17 @@ export function PublicPlaylistPage() {
                       {a.kind === 'score' ? 'Partition' : 'Audio'}
                       {a.label ? ` — ${a.label}` : ''}
                     </p>
-                    {a.kind === 'score' ? <PdfViewer url={a.url} /> : <AudioPlayer url={a.url} />}
+                    {a.kind === 'score' ? (
+                      <PdfViewer url={a.url} media={mediaOf(selected, a)} />
+                    ) : (
+                      <AudioPlayer url={a.url} media={mediaOf(selected, a)} />
+                    )}
                     <a
                       href={a.url}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-block text-xs text-muted-foreground hover:underline"
+                      onClick={() => trackDownload(a.kind, mediaOf(selected, a))}
                     >
                       Télécharger
                     </a>

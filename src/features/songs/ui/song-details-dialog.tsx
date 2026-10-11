@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { songQueries } from '@/features/songs/ui/queries'
 import { PdfViewer } from '@/shared/ui/media/pdf-viewer'
 import { AudioPlayer } from '@/shared/ui/media/audio-player'
+import type { MediaContext } from '@/shared/ui/media/media-analytics'
 
 export function SongDetailsDialog({ songId }: { songId: string }) {
   const [open, setOpen] = useState(false)
@@ -40,7 +41,11 @@ export function SongDetailsDialog({ songId }: { songId: string }) {
                     {a.label ? ` — ${a.label}` : ''}
                   </p>
                   {a.url ? (
-                    a.kind === 'score' ? <PdfViewer url={a.url} /> : <AudioPlayer url={a.url} />
+                    <AssetPreview
+                      url={a.url}
+                      kind={a.kind}
+                      media={{ source: 'song_details', songId, songTitle: data.song.title, assetId: a.id, assetLabel: a.label }}
+                    />
                   ) : (
                     <p className="text-xs text-muted-foreground">Fichier en cours de traitement</p>
                   )}
@@ -55,4 +60,8 @@ export function SongDetailsDialog({ songId }: { songId: string }) {
       </DialogContent>
     </Dialog>
   )
+}
+
+function AssetPreview({ url, kind, media }: { url: string; kind: 'score' | 'audio'; media: MediaContext }) {
+  return kind === 'score' ? <PdfViewer url={url} media={media} /> : <AudioPlayer url={url} media={media} />
 }

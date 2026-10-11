@@ -11,6 +11,7 @@ import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import { ReactQueryDevtoolsPanel } from '@tanstack/react-query-devtools'
 import { Toaster } from 'sonner'
+import { useScreenViews } from '@/app/shell/analytics'
 
 import '../styles.css'
 
@@ -26,6 +27,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 })
 
 function RootComponent() {
+  useScreenViews()
+
   return (
     <RootDocument>
       <Outlet />

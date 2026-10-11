@@ -3,12 +3,14 @@ import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import { Button } from '@/shared/ui/primitives/button'
 import { useStableUrl } from './use-stable-url'
+import { trackScoreView, type MediaContext } from './media-analytics'
 
 // react-pdf (pdfjs-dist) touches browser-only globals (DOMMatrix) at module
 // load — importing it statically crashes SSR. Load it only on the client.
 let ReactPdf: typeof import('react-pdf') | null = null
 
-export function PdfViewer({ url: latestUrl }: { url: string }) {
+/** `media` identifies the score in analytics; omitted for documents built in the browser. */
+export function PdfViewer({ url: latestUrl, media }: { url: string; media?: MediaContext }) {
   const url = useStableUrl(latestUrl)
   const [Document, setDocument] = useState<ComponentType<any> | null>(null)
   const [Page, setPage] = useState<ComponentType<any> | null>(null)
@@ -55,7 +57,10 @@ export function PdfViewer({ url: latestUrl }: { url: string }) {
       >
         <Document
           file={url}
-          onLoadSuccess={({ numPages }: { numPages: number }) => setNumPages(numPages)}
+          onLoadSuccess={({ numPages }: { numPages: number }) => {
+            setNumPages(numPages)
+            if (media) trackScoreView(media, numPages)
+          }}
           onLoadError={() => setError(true)}
           loading={<div className="flex h-64 items-center justify-center text-sm text-muted-foreground">Chargement…</div>}
         >

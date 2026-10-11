@@ -5,8 +5,11 @@ import { AppSidebar } from '@/app/shell/app-sidebar'
 import { OrgSwitcher } from '@/features/organizations/ui/org-switcher'
 import { ConfirmProvider } from '@/shared/ui/confirm-dialog'
 import { useRole } from '@/features/auth/ui/queries'
+import { useIdentifyMember } from '@/app/shell/analytics'
+
 export function AuthedLayout() {
   const role = useRole()
+  useIdentifyMember(role)
 
   return (
     <TooltipProvider>

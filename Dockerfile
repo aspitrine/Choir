@@ -16,6 +16,10 @@ RUN pnpm install --prod --frozen-lockfile
 
 # ---- build: compile the app (Nitro produces a self-contained .output) ----
 FROM base AS build
+# Product analytics (OpenPanel): inlined into the client bundle at build time,
+# tracking stays off when unset.
+ARG VITE_OPENPANEL_CLIENT_ID
+ARG VITE_OPENPANEL_API_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build

@@ -12,6 +12,7 @@ import {
   SidebarMenuItem,
 } from '@/shared/ui/primitives/sidebar'
 import { signOut, useSession } from '@/features/auth/ui/auth-client'
+import { clearIdentity } from '@/shared/ui/lib/analytics'
 
 const NAV_ITEMS = [
   { to: '/dashboard' as const, label: 'Tableau de bord', icon: LayoutDashboard },
@@ -60,7 +61,16 @@ export function AppSidebar({ role }: { role: string | null }) {
           ) : null}
           <SidebarMenuItem>
             <SidebarMenuButton
-              onClick={() => signOut({ fetchOptions: { onSuccess: () => window.location.assign('/') } })}
+              onClick={() =>
+                signOut({
+                  fetchOptions: {
+                    onSuccess: () => {
+                      clearIdentity()
+                      window.location.assign('/')
+                    },
+                  },
+                })
+              }
             >
               <LogOut />
               <span>Se déconnecter</span>
