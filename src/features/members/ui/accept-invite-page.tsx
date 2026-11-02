@@ -1,7 +1,6 @@
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { sessionKeys } from '@/features/auth/ui/queries'
 import { Button } from '@/shared/ui/primitives/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/primitives/card'
 import { Input } from '@/shared/ui/primitives/input'
@@ -48,8 +47,10 @@ export function AcceptInvitePage() {
   const accept = useMutation({
     mutationFn: () => acceptInvitationFn({ data: { invitationId, secret: secret ?? '' } }),
     onSuccess: async () => {
-      // The session now has an active choir and a role: drop anything cached before.
-      queryClient.removeQueries({ queryKey: sessionKeys.all })
+      // The session now has an active choir and a role: anything cached before
+      // (session, or another choir's data) is dropped. This page unmounts right
+      // after, so no mounted query is left holding a removed entry.
+      queryClient.removeQueries()
       await navigate({ to: '/dashboard' })
     },
   })

@@ -222,7 +222,14 @@ function AssetRow({
           )}
         </div>
         {isManager ? (
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog
+            open={open}
+            onOpenChange={(next) => {
+              // Start from the stored groups, not from a previous unsaved selection.
+              if (next) setSelected(new Set(asset.groups.map((g) => g.id)))
+              setOpen(next)
+            }}
+          >
             <DialogTrigger asChild>
               <button className="mt-1 text-xs text-muted-foreground hover:underline">Modifier</button>
             </DialogTrigger>

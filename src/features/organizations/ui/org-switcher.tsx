@@ -37,10 +37,12 @@ export function OrgSwitcher() {
   const { data: activeOrganization, isPending: activeOrgPending } = authClient.useActiveOrganization()
   const [createOpen, setCreateOpen] = useState(false)
 
-  // Every cached query belongs to the previous choir: drop them all (session and
-  // role included) before the loaders run again for the new one.
+  // Every cached query belongs to the previous choir (session and role included).
+  // Reset, not remove: the mounted pages stay subscribed to their queries, so they
+  // refetch for the new choir instead of keeping the previous one's data on screen.
+  // Then the loaders run again (role checks and redirects).
   async function resetForActiveOrganization() {
-    queryClient.removeQueries()
+    await queryClient.resetQueries()
     await router.invalidate()
   }
 
@@ -83,10 +85,7 @@ export function OrgSwitcher() {
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="gap-2 px-2.5 py-2"
-            onSelect={(e) => {
-              e.preventDefault()
-              setCreateOpen(true)
-            }}
+            onSelect={() => setCreateOpen(true)}
           >
             <Plus className="size-4" />
             Créer une nouvelle chorale
