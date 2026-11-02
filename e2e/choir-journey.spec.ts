@@ -64,6 +64,37 @@ test('director creates a song and uploads files per voice', async ({ page }) => 
   await expect(page.getByRole('cell', { name: 'Tutti' })).toBeVisible()
 })
 
+test('score preview keeps pagination accessible on small screens', async ({ page }) => {
+  await gotoHydrated(page, '/songs')
+  await page.getByRole('link', { name: songTitle }).click()
+  // The dev-only launcher floats over the pagination on narrow screens.
+  await page.addStyleTag({ content: 'button[aria-label="Open TanStack Devtools"] { display: none; }' })
+
+  for (const viewport of [{ width: 375, height: 500 }, { width: 667, height: 375 }, { width: 1280, height: 800 }]) {
+    await page.setViewportSize(viewport)
+    await page.getByRole('row').filter({ hasText: 'Partition basse' }).getByRole('button', { name: 'Aperçu' }).click()
+    const preview = page.getByRole('dialog', { name: 'Partition basse' })
+    const next = preview.getByRole('button', { name: 'Suivant' })
+    const previous = preview.getByRole('button', { name: 'Précédent' })
+    await expect(preview.getByText('Page 1 / 2')).toBeVisible()
+    await expect(next).toBeInViewport({ ratio: 1 })
+    await expect(previous).toBeInViewport({ ratio: 1 })
+    await expect(preview.getByRole('button', { name: 'Close' })).toBeInViewport({ ratio: 1 })
+    await expect(preview.locator('canvas')).toBeVisible()
+    const pdf = preview.locator('.react-pdf__Document').locator('..')
+    await pdf.hover()
+    await page.mouse.wheel(0, 1000)
+    await expect.poll(() => pdf.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+    await expect(next).toBeInViewport({ ratio: 1 })
+    await next.click()
+    await expect(preview.getByText('Page 2 / 2')).toBeVisible()
+    await previous.click()
+    await expect(preview.getByText('Page 1 / 2')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(preview).toBeHidden()
+  }
+})
+
 test('audio keeps playing in a mini player once its dialog is closed', async ({ page, browser }) => {
   await gotoHydrated(page, '/songs')
   await page.getByRole('link', { name: songTitle }).click()

@@ -277,8 +277,8 @@ function AssetRow({
               Aperçu
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
+          <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
+            <DialogHeader className="shrink-0 pr-8">
               <DialogTitle>{asset.label || (asset.kind === 'score' ? 'Partition' : 'Audio')}</DialogTitle>
             </DialogHeader>
             {asset.url ? (

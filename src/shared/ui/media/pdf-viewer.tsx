@@ -48,9 +48,9 @@ export function PdfViewer({ url: latestUrl, media }: { url: string; media?: Medi
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex min-h-0 flex-col gap-2">
       <div
-        className="max-w-full overflow-auto rounded-md border bg-muted/30"
+        className="min-h-0 max-w-full overflow-auto rounded-md border bg-muted/30"
         ref={(el) => {
           if (el) setWidth(Math.min(el.clientWidth, 800))
         }}
@@ -68,7 +68,7 @@ export function PdfViewer({ url: latestUrl, media }: { url: string; media?: Medi
         </Document>
       </div>
       {numPages && numPages > 1 ? (
-        <div className="flex items-center justify-between text-sm">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm">
           <span className="text-muted-foreground">
             Page {pageNum} / {numPages}
           </span>
