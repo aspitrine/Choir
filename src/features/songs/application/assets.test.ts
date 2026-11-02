@@ -5,7 +5,15 @@ import { ForbiddenError, NotFoundError, StorageError } from '@/shared/domain/err
 import { actorOf, createTestDb, fail, fakeStorage, run, testLayer, type FakeStorage, type TestDb } from '@/test/db'
 import { seedAsset, seedGroup, seedOrg, seedSong } from '@/test/fixtures'
 import { asset, assetGroup } from '../infrastructure/schema'
-import { confirmUpload, createUploadIntent, deleteAsset, purgeStaleUploads, setAssetGroups } from './assets'
+import {
+  confirmUpload,
+  createUploadIntent,
+  deleteAsset,
+  getAssetUrl,
+  purgeStaleUploads,
+  saveMissingWaveform,
+  setAssetGroups,
+} from './assets'
 
 let t: TestDb
 let storage: FakeStorage
@@ -107,6 +115,16 @@ describe('confirmUpload', () => {
     })
   })
 
+  it('stores the waveform of an audio file, never of a score', async () => {
+    const org = await seedOrg(t.db)
+    const song = await seedSong(t.db, org.id, 'Ave')
+    const waveform = { peaks: [0.2, 1], durationMs: 61_000 }
+    const audio = await seedAsset(t.db, song.id, { kind: 'audio', status: 'uploading' })
+    expect(await run(layer(), confirmUpload(actorOf(org.id), audio.id, waveform))).toMatchObject({ peaks: [0.2, 1], durationMs: 61_000 })
+    const score = await seedAsset(t.db, song.id, { status: 'uploading' })
+    expect(await run(layer(), confirmUpload(actorOf(org.id), score.id, waveform))).toMatchObject({ peaks: null, durationMs: null })
+  })
+
   it('keeps the asset pending when the object is missing', async () => {
     const org = await seedOrg(t.db)
     const a = await seedAsset(t.db, (await seedSong(t.db, org.id, 'Ave')).id, { status: 'uploading' })
@@ -145,5 +163,32 @@ describe('deleteAsset and setAssetGroups', () => {
     expect(await fail(layer(), setAssetGroups(actorOf(org.id), a.id, []))).toBeInstanceOf(NotFoundError)
     expect(await fail(layer(), confirmUpload(actorOf(org.id), a.id))).toBeInstanceOf(NotFoundError)
     expect(storage.removed).toEqual([])
+  })
+})
+
+describe('saveMissingWaveform', () => {
+  it('lets any member fill in a missing waveform, without ever replacing one', async () => {
+    const org = await seedOrg(t.db)
+    const a = await seedAsset(t.db, (await seedSong(t.db, org.id, 'Ave')).id, { kind: 'audio' })
+    const first = { peaks: [1], durationMs: 1000 }
+    await run(layer(), saveMissingWaveform(actorOf(org.id, 'member'), a.id, first))
+    await run(layer(), saveMissingWaveform(actorOf(org.id, 'member'), a.id, { peaks: [0.5], durationMs: 9 }))
+    expect((await t.db.select().from(asset).where(eq(asset.id, a.id)))[0]).toMatchObject(first)
+
+    const other = await seedOrg(t.db, 'B')
+    expect(await fail(layer(), saveMissingWaveform(actorOf(other.id), a.id, first))).toBeInstanceOf(NotFoundError)
+  })
+})
+
+describe('getAssetUrl', () => {
+  it('presigns a ready file of the choir, for any member', async () => {
+    const org = await seedOrg(t.db)
+    const song = await seedSong(t.db, org.id, 'Ave')
+    const a = await seedAsset(t.db, song.id, { kind: 'audio' })
+    expect(await run(layer(), getAssetUrl(actorOf(org.id, 'member'), a.id))).toBe(`https://s3.test/get/${a.storageKey}`)
+
+    const pending = await seedAsset(t.db, song.id, { status: 'uploading' })
+    expect(await fail(layer(), getAssetUrl(actorOf(org.id), pending.id))).toBeInstanceOf(NotFoundError)
+    expect(await fail(layer(), getAssetUrl(actorOf((await seedOrg(t.db, 'B')).id), a.id))).toBeInstanceOf(NotFoundError)
   })
 })

@@ -64,6 +64,33 @@ test('director creates a song and uploads files per voice', async ({ page }) => 
   await expect(page.getByRole('cell', { name: 'Tutti' })).toBeVisible()
 })
 
+test('audio keeps playing in a mini player once its dialog is closed', async ({ page, browser }) => {
+  await gotoHydrated(page, '/songs')
+  await page.getByRole('link', { name: songTitle }).click()
+  await page.getByRole('row').filter({ hasText: 'Tutti' }).getByRole('button', { name: 'Aperçu' }).click()
+  const preview = page.getByRole('dialog', { name: 'Tutti' })
+  await preview.getByRole('button', { name: 'Écouter' }).click()
+
+  const bar = page.getByRole('region', { name: 'Lecture en cours' })
+  await expect(bar.getByText(songTitle)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(preview).toBeHidden()
+  await expect(bar.getByText(songTitle)).toBeVisible()
+
+  // Streamed from a stable address (members only) that redirects to a freshly presigned URL.
+  const src = (await page.locator('body > audio').getAttribute('src'))!
+  expect(src).toMatch(/^\/api\/files\/[\w-]+$/)
+  const redirect = await page.request.get(src, { maxRedirects: 0 })
+  expect(redirect.status()).toBe(302)
+  expect(redirect.headers().location).toMatch(/Tutti\.mp3/)
+  const stranger = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  expect((await stranger.request.get(new URL(src, page.url()).toString(), { maxRedirects: 0 })).status()).toBe(401)
+  await stranger.close()
+
+  await bar.getByRole('button', { name: 'Fermer le lecteur' }).click()
+  await expect(bar).toHaveCount(0)
+})
+
 test('director builds a playlist and shares it', async ({ page }) => {
   await gotoHydrated(page, '/playlists')
   const createDialog = await openCreateDialog(page, 'Nouvelle playlist')

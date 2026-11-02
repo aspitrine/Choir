@@ -113,7 +113,7 @@ describe('public access', () => {
 
     const page = await run(layer, getPublicPlaylist(token))
     expect(Object.keys(page.items[0]!.song).sort()).toEqual(['arranger', 'composer', 'id', 'key', 'tempo', 'title'])
-    expect(Object.keys(page.items[0]!.assets[0]!).sort()).toEqual(['groups', 'id', 'kind', 'label', 'mimeType', 'status', 'url'])
+    expect(Object.keys(page.items[0]!.assets[0]!).sort()).toEqual(['durationMs', 'groups', 'id', 'kind', 'label', 'mimeType', 'peaks', 'status', 'url'])
     const json = JSON.stringify(page)
     expect(json).not.toContain('soliste malade')
     expect(json).not.toContain(org.id)

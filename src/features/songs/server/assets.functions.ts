@@ -4,7 +4,8 @@ import { GroupIds, Id } from '@/shared/domain/schemas'
 import { decodeInput } from '@/shared/server/request'
 import { withActor } from '@/app/runtime'
 import { CreateUploadIntentInput } from '../domain/song'
-import { confirmUpload, createUploadIntent, deleteAsset, setAssetGroups } from '../application/assets'
+import { AudioWaveform } from '../domain/asset'
+import { confirmUpload, createUploadIntent, deleteAsset, saveMissingWaveform, setAssetGroups } from '../application/assets'
 
 const ByAsset = Schema.Struct({ assetId: Id })
 
@@ -13,8 +14,12 @@ export const createUploadIntentFn = createServerFn({ method: 'POST' })
   .handler(({ data }) => withActor((actor) => createUploadIntent(actor, data)))
 
 export const confirmUploadFn = createServerFn({ method: 'POST' })
-  .validator(decodeInput(ByAsset))
-  .handler(({ data }) => withActor((actor) => confirmUpload(actor, data.assetId)))
+  .validator(decodeInput(Schema.Struct({ assetId: Id, waveform: Schema.NullOr(AudioWaveform) })))
+  .handler(({ data }) => withActor((actor) => confirmUpload(actor, data.assetId, data.waveform)))
+
+export const saveWaveformFn = createServerFn({ method: 'POST' })
+  .validator(decodeInput(Schema.Struct({ assetId: Id, waveform: AudioWaveform })))
+  .handler(({ data }) => withActor((actor) => saveMissingWaveform(actor, data.assetId, data.waveform)))
 
 export const setAssetGroupsFn = createServerFn({ method: 'POST' })
   .validator(decodeInput(Schema.Struct({ assetId: Id, groupIds: GroupIds })))

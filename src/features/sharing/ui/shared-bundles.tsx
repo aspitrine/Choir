@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { PdfViewer } from '@/shared/ui/media/pdf-viewer'
 import { pauseOtherPlayers, registerPlayer } from '@/shared/ui/media/exclusive-playback'
 import { createListenTracker, isAtEnd } from '@/shared/ui/media/media-analytics'
+import { claimMediaSession, preferPlaybackAudioSession, updateMediaPosition } from '@/shared/ui/media/media-session'
 import { track } from '@/shared/ui/lib/analytics'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { publicQueries } from '@/features/sharing/ui/queries'
@@ -96,20 +97,37 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
     if (wantPlay.current) audioRef.current?.play().catch(() => {})
   }, [src, current.key])
 
-  // Lock-screen / headset controls drive whichever player is playing — not the
-  // last one mounted — so claim them on every play (incl. each new track).
-  const claimMediaSession = () => {
-    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return
-    navigator.mediaSession.metadata = new MediaMetadata({ title: fileTitle(current) })
+  // Claimed on every play (incl. each new track): the lock screen shows it.
+  const claimControls = () => {
+    const audio = () => audioRef.current
     const skip = (delta: number) => () => playStep(delta)
-    navigator.mediaSession.setActionHandler('nexttrack', tracks.length > 1 ? skip(1) : null)
-    navigator.mediaSession.setActionHandler('previoustrack', tracks.length > 1 ? skip(-1) : null)
+    const seekBy = (delta: number) => {
+      const a = audio()
+      if (a) a.currentTime = Math.max(0, Math.min(a.duration || Infinity, a.currentTime + delta))
+    }
+    claimMediaSession(
+      { title: current.title, artist: current.label ?? '', album: 'Chorale' },
+      {
+        play: () => void audio()?.play().catch(() => {}),
+        pause: () => audio()?.pause(),
+        stop: () => audio()?.pause(),
+        seekbackward: (d) => seekBy(-(d.seekOffset ?? 10)),
+        seekforward: (d) => seekBy(d.seekOffset ?? 10),
+        seekto: (d) => {
+          const a = audio()
+          if (a && d.seekTime != null) a.currentTime = d.seekTime
+        },
+        nexttrack: tracks.length > 1 ? skip(1) : null,
+        previoustrack: tracks.length > 1 ? skip(-1) : null,
+      },
+    )
   }
 
   const onPlay = () => {
     wantPlay.current = true
     pauseOtherPlayers(player)
-    claimMediaSession()
+    preferPlaybackAudioSession()
+    claimControls()
     listening.play(
       { source: 'shared_bundle', songTitle: current.title, assetId: current.assetId, assetLabel: current.label },
       audioRef.current?.currentTime ?? 0,
@@ -120,6 +138,7 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
   const onPause = () => {
     wantPlay.current = false
     const audio = audioRef.current
+    if (audio) updateMediaPosition(audio)
     listening.stop(audio ? isAtEnd(audio.currentTime, audio.duration) : false)
   }
 
@@ -150,7 +169,10 @@ function LoopPlaylistPlayer({ token, tracks }: { token: string; tracks: Array<Bu
         onPlay={onPlay}
         onPlaying={onPlaying}
         onPause={onPause}
-        onTimeUpdate={(e) => listening.progress(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          listening.progress(e.currentTarget.currentTime)
+          updateMediaPosition(e.currentTarget)
+        }}
         onEnded={() => playStep(1)}
         onError={onError}
       />

@@ -1,6 +1,7 @@
 import { confirmUploadFn, createUploadIntentFn, deleteAssetFn } from '@/features/songs/server/assets.functions'
 import { guessAssetKind } from '@/features/songs/domain/song'
 import type { CreateUploadIntentInput } from '@/features/songs/domain/song'
+import { computeWaveform } from '@/shared/ui/media/waveform-peaks'
 
 export type UploadAssetInput = {
   songId: string
@@ -17,10 +18,11 @@ export type UploadAssetInput = {
  */
 export async function uploadAsset({ songId, file, label, groupIds }: UploadAssetInput) {
   const contentType = file.type as CreateUploadIntentInput['contentType']
+  const kind = guessAssetKind(file.type)
   const { assetId, uploadUrl } = await createUploadIntentFn({
     data: {
       songId,
-      kind: guessAssetKind(file.type),
+      kind,
       label,
       filename: file.name,
       contentType,
@@ -28,9 +30,12 @@ export async function uploadAsset({ songId, file, label, groupIds }: UploadAsset
     },
   })
   try {
+    // Drawn by the player instead of decoding the whole file on every listen.
+    // Best effort: a format this browser can't decode is uploaded without one.
+    const waveform = kind === 'audio' ? file.arrayBuffer().then(computeWaveform).catch(() => null) : null
     const res = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': contentType } })
     if (!res.ok) throw new Error(`Storage refused the upload (${res.status})`)
-    return await confirmUploadFn({ data: { assetId } })
+    return await confirmUploadFn({ data: { assetId, waveform: await waveform } })
   } catch (error) {
     await deleteAssetFn({ data: { assetId } }).catch(() => {})
     throw error

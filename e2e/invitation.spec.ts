@@ -26,7 +26,7 @@ test('an invited singer creates an account, joins the choir with read-only acces
   expect(new URL(link).searchParams.get('k')).toMatch(/^[\w-]{43}$/)
   await dialog.getByRole('button', { name: 'Fermer' }).click()
 
-  // A pending invitation can be corrected; the link stays the same.
+  // A pending invitation can be corrected; the link stays the same while the email does.
   const invitationRow = page.getByRole('row').filter({ hasText: email })
   await invitationRow.getByRole('button', { name: 'Modifier' }).click()
   const editInvite = page.getByRole('dialog', { name: "Modifier l'invitation" })
@@ -36,6 +36,14 @@ test('an invited singer creates an account, joins the choir with read-only acces
   await expect(editInvite).toBeHidden()
   await expect(invitationRow.getByText('Jeanne Durand')).toBeVisible()
   await expect(invitationRow.getByText(voice)).toBeVisible()
+
+  // The invitee's sign-up form starts with the name the director entered.
+  const visitor = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  const preview = await visitor.newPage()
+  await gotoHydrated(preview, link)
+  await preview.getByRole('button', { name: 'Ou créer un compte avec un mot de passe' }).click()
+  await expect(preview.getByLabel('Nom')).toHaveValue('Jeanne Durand')
+  await visitor.close()
 
   const singer = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const pub = await singer.newPage()
@@ -91,12 +99,15 @@ test('an invited singer creates an account, joins the choir with read-only acces
   // Role and groups are edited together, and the row shows the result right away.
   await memberRow.getByRole('button', { name: 'Modifier' }).click()
   const editMember = page.getByRole('dialog', { name: 'Modifier Jeanne Choriste' })
+  await expect(editMember.getByLabel('Email')).toHaveValue(email)
+  await editMember.getByLabel('Nom').fill('Jeanne Martin')
   await editMember.getByLabel('Rôle').selectOption('admin')
   await editMember.getByLabel(voice).uncheck()
   await editMember.getByRole('button', { name: 'Enregistrer' }).click()
   await expect(editMember).toBeHidden()
   await expect(memberRow.getByRole('cell', { name: 'Admin', exact: true })).toBeVisible()
   await expect(memberRow.getByText('Tout le monde')).toBeVisible()
+  await expect(memberRow.getByRole('cell', { name: 'Jeanne Martin' })).toBeVisible()
 
   // Once removed, the singer's still-open session loses access to the choir.
   await memberRow.getByRole('button', { name: 'Retirer' }).click()

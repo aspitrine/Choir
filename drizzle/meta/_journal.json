@@ -64,6 +64,13 @@
       "when": 1791197178498,
       "tag": "0008_invitation_secret",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793638410967,
+      "tag": "0009_asset_waveform",
+      "breakpoints": true
     }
   ]
 }

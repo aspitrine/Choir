@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { songQueries } from '@/features/songs/ui/queries'
 import { PdfViewer } from '@/shared/ui/media/pdf-viewer'
 import { AudioPlayer } from '@/shared/ui/media/audio-player'
+import { assetFileUrl, saveAssetWaveform } from '@/features/songs/ui/asset-audio'
 import type { MediaContext } from '@/shared/ui/media/media-analytics'
 
 export function SongDetailsDialog({ songId }: { songId: string }) {
@@ -42,8 +43,7 @@ export function SongDetailsDialog({ songId }: { songId: string }) {
                   </p>
                   {a.url ? (
                     <AssetPreview
-                      url={a.url}
-                      kind={a.kind}
+                      asset={{ ...a, url: a.url }}
                       media={{ source: 'song_details', songId, songTitle: data.song.title, assetId: a.id, assetLabel: a.label }}
                     />
                   ) : (
@@ -62,6 +62,27 @@ export function SongDetailsDialog({ songId }: { songId: string }) {
   )
 }
 
-function AssetPreview({ url, kind, media }: { url: string; kind: 'score' | 'audio'; media: MediaContext }) {
-  return kind === 'score' ? <PdfViewer url={url} media={media} /> : <AudioPlayer url={url} media={media} />
+type PreviewedAsset = {
+  id: string
+  kind: 'score' | 'audio'
+  url: string
+  mimeType: string
+  peaks: Array<number> | null
+  durationMs: number | null
+}
+
+function AssetPreview({ asset, media }: { asset: PreviewedAsset; media: MediaContext }) {
+  return asset.kind === 'score' ? (
+    <PdfViewer url={asset.url} media={media} />
+  ) : (
+    <AudioPlayer
+      src={assetFileUrl(asset.id)}
+      downloadUrl={asset.url}
+      mimeType={asset.mimeType}
+      peaks={asset.peaks}
+      durationMs={asset.durationMs}
+      media={media}
+      saveWaveform={saveAssetWaveform(asset.id)}
+    />
+  )
 }

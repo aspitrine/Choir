@@ -12,6 +12,8 @@ import { TanStackDevtools } from '@tanstack/react-devtools'
 import { ReactQueryDevtoolsPanel } from '@tanstack/react-query-devtools'
 import { Toaster } from 'sonner'
 import { useScreenViews } from '@/app/shell/analytics'
+import { NowPlayingBar } from '@/shared/ui/media/now-playing-bar'
+import { usePlayback } from '@/shared/ui/media/playback'
 
 import '../styles.css'
 
@@ -28,11 +30,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootComponent() {
   useScreenViews()
+  // Toasts stay clear of the mini player.
+  const playerOpen = usePlayback().track !== null
+  const toastOffset = { bottom: playerOpen ? 88 : 24 }
 
   return (
     <RootDocument>
       <Outlet />
-      <Toaster richColors position="bottom-right" />
+      <NowPlayingBar />
+      <Toaster richColors position="bottom-right" offset={toastOffset} mobileOffset={toastOffset} />
       <TanStackDevtools
         config={{ position: 'bottom-right' }}
         plugins={[

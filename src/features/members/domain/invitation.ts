@@ -4,11 +4,13 @@ import { AssignableRole } from '@/features/auth/domain/roles'
 
 const OptionalName = Schema.NullOr(Schema.String.pipe(Schema.maxLength(100)))
 
+const Email = Schema.Trim.pipe(
+  Schema.maxLength(254),
+  Schema.pattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, { message: () => 'Email invalide' }),
+)
+
 export const CreateInviteInput = Schema.Struct({
-  email: Schema.Trim.pipe(
-    Schema.maxLength(254),
-    Schema.pattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, { message: () => 'Email invalide' }),
-  ),
+  email: Email,
   firstName: OptionalName,
   lastName: OptionalName,
   role: AssignableRole,
@@ -16,12 +18,23 @@ export const CreateInviteInput = Schema.Struct({
 })
 export type CreateInviteInput = typeof CreateInviteInput.Type
 
-/** The email can't change: the link carries it and Better Auth checks the recipient against it. */
+/**
+ * Changing the email makes a new link (new secret): the old one, sent to the
+ * previous address, stops working.
+ */
 export const UpdateInviteInput = Schema.Struct({
   invitationId: Id,
-  ...CreateInviteInput.omit('email').fields,
+  ...CreateInviteInput.fields,
 })
 export type UpdateInviteInput = typeof UpdateInviteInput.Type
+
+/** A member's account name and email, as edited by a manager. */
+export const UpdateMemberProfileInput = Schema.Struct({
+  memberId: Id,
+  name: Schema.Trim.pipe(Schema.minLength(1, { message: () => 'Nom requis' }), Schema.maxLength(100)),
+  email: Email,
+})
+export type UpdateMemberProfileInput = typeof UpdateMemberProfileInput.Type
 
 /**
  * Random secret carried by the invite link and checked on acceptance: the

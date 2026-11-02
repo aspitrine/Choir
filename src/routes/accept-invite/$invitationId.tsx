@@ -1,7 +1,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { Schema } from 'effect'
 import { AcceptInvitePage } from '@/features/members/ui/accept-invite-page'
-import { isInviteLinkUsedFn } from '@/features/members/server/members.functions'
+import { readInviteLinkFn } from '@/features/members/server/members.functions'
 
 const AcceptInviteSearch = Schema.Struct({
   // Secret proving the visitor received the link (not just the invitation id).
@@ -14,9 +14,10 @@ export const Route = createFileRoute('/accept-invite/$invitationId')({
   validateSearch: (search) => Schema.decodeUnknownSync(AcceptInviteSearch)(search),
   // An already used link leads home: the dashboard when signed in, the login page otherwise.
   beforeLoad: async ({ params: { invitationId }, search: { k } }) => {
-    if (k && (await isInviteLinkUsedFn({ data: { invitationId, secret: k } }))) {
-      throw redirect({ to: '/' })
-    }
+    const link = k ? await readInviteLinkFn({ data: { invitationId, secret: k } }) : null
+    if (link?.used) throw redirect({ to: '/' })
+    // Prefills the sign-up form with the name the inviter entered.
+    return { inviteeName: link?.inviteeName ?? '' }
   },
   head: ({ match }) => {
     const orgName = match.search.org

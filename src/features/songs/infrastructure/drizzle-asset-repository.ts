@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { and, asc, eq, inArray, lt } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, lt } from 'drizzle-orm'
 import { Database } from '@/shared/infrastructure/db/database'
 import { NotFoundError } from '@/shared/domain/errors'
 import { group } from '@/features/groups/infrastructure/schema'
@@ -46,10 +46,22 @@ export const DrizzleAssetRepository = Layer.effect(
         }
       }),
 
-    markReady: (assetId, { sizeBytes, mimeType }) =>
+    markReady: (assetId, { sizeBytes, mimeType, waveform }) =>
       Effect.promise(() =>
-        db.update(asset).set({ status: 'ready', sizeBytes, mimeType }).where(eq(asset.id, assetId)).returning(),
+        db
+          .update(asset)
+          .set({ status: 'ready', sizeBytes, mimeType, ...(waveform ? { peaks: [...waveform.peaks], durationMs: waveform.durationMs } : {}) })
+          .where(eq(asset.id, assetId))
+          .returning(),
       ).pipe(Effect.map(([row]) => row!)),
+
+    saveMissingWaveform: (assetId, { peaks, durationMs }) =>
+      Effect.promise(() =>
+        db
+          .update(asset)
+          .set({ peaks: [...peaks], durationMs })
+          .where(and(eq(asset.id, assetId), eq(asset.kind, 'audio'), isNull(asset.peaks))),
+      ).pipe(Effect.asVoid),
 
     remove: (assetId) => Effect.promise(() => db.delete(asset).where(eq(asset.id, assetId))).pipe(Effect.asVoid),
 

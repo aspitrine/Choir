@@ -22,6 +22,7 @@ function roleLabel(role: string) {
 export function AcceptInvitePage() {
   const { invitationId } = routeApi.useParams()
   const { email: invitedEmail, org: orgName, k: secret } = routeApi.useSearch()
+  const { inviteeName } = routeApi.useRouteContext()
   const navigate = useNavigate()
   const { data: session, isPending: sessionPending } = useSession()
 
@@ -68,7 +69,7 @@ export function AcceptInvitePage() {
           {sessionPending ? (
             <p className="text-sm text-muted-foreground">Chargement…</p>
           ) : !session ? (
-            <SignInOptions invitedEmail={invitedEmail} callbackURL={callbackURL} />
+            <SignInOptions invitedEmail={invitedEmail} inviteeName={inviteeName} callbackURL={callbackURL} />
           ) : emailMismatch ? (
             <div className="space-y-2">
               <p className="text-sm text-destructive">
@@ -106,9 +107,17 @@ export function AcceptInvitePage() {
   )
 }
 
-function SignInOptions({ invitedEmail, callbackURL }: { invitedEmail?: string; callbackURL?: string }) {
+function SignInOptions({
+  invitedEmail,
+  inviteeName,
+  callbackURL,
+}: {
+  invitedEmail?: string
+  inviteeName: string
+  callbackURL?: string
+}) {
   const [showPasswordForm, setShowPasswordForm] = useState(false)
-  const [name, setName] = useState('')
+  const [name, setName] = useState(inviteeName)
   const [password, setPassword] = useState('')
   const signUp = useMutation({
     mutationFn: async (email: string) => {

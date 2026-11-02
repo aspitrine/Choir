@@ -6,17 +6,18 @@ import { decodeInput, requestHeaders } from '@/shared/server/request'
 import { runServer, withActor } from '@/app/runtime'
 import { requireSession } from '@/features/auth/application/access'
 import { AssignableRole } from '@/features/auth/domain/roles'
-import { CreateInviteInput, UpdateInviteInput } from '../domain/invitation'
+import { CreateInviteInput, UpdateInviteInput, UpdateMemberProfileInput } from '../domain/invitation'
 import {
   acceptInvite,
   createInvite,
-  isInviteLinkUsed,
+  readInviteLink,
   removeMember,
   revokeInvite,
   searchInvitations,
   searchMembers,
   updateMemberGroups,
   updateInvite,
+  updateMemberProfile,
   updateMemberRole,
 } from '../application/members'
 
@@ -46,6 +47,10 @@ export const updateMemberRoleFn = createServerFn({ method: 'POST' })
   .validator(decodeInput(Schema.Struct({ memberId: Id, role: AssignableRole })))
   .handler(({ data }) => withActor((actor) => updateMemberRole(actor, data.memberId, data.role)))
 
+export const updateMemberProfileFn = createServerFn({ method: 'POST' })
+  .validator(decodeInput(UpdateMemberProfileInput))
+  .handler(({ data }) => withActor((actor) => updateMemberProfile(actor, data)))
+
 export const updateMemberGroupsFn = createServerFn({ method: 'POST' })
   .validator(decodeInput(Schema.Struct({ memberId: Id, groupIds: GroupIds })))
   .handler(({ data }) => withActor((actor) => updateMemberGroups(actor, data.memberId, data.groupIds)))
@@ -57,9 +62,9 @@ export const removeMemberFn = createServerFn({ method: 'POST' })
 const InviteLink = Schema.Struct({ invitationId: Id, secret: Schema.String.pipe(Schema.maxLength(200)) })
 
 // Opened before signing in: no session required.
-export const isInviteLinkUsedFn = createServerFn({ method: 'GET' })
+export const readInviteLinkFn = createServerFn({ method: 'GET' })
   .validator(decodeInput(InviteLink))
-  .handler(({ data }) => runServer(isInviteLinkUsed(data.invitationId, data.secret)))
+  .handler(({ data }) => runServer(readInviteLink(data.invitationId, data.secret)))
 
 // The invitee isn't a member yet: only a session is required.
 export const acceptInvitationFn = createServerFn({ method: 'POST' })

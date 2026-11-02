@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   integer,
+  jsonb,
   timestamp,
   pgEnum,
   primaryKey,
@@ -45,6 +46,9 @@ export const asset = pgTable('asset', {
   mimeType: text('mime_type').notNull(),
   sizeBytes: integer('size_bytes').notNull().default(0),
   durationMs: integer('duration_ms'),
+  // Audio only: waveform drawn by the player, computed once in the browser
+  // (at upload, or by the first listener for older files). See Waveform.
+  peaks: jsonb('peaks').$type<Array<number>>(),
   status: assetStatus('status').notNull().default('uploading'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })

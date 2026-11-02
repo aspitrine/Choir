@@ -25,6 +25,7 @@ import { uploadAsset } from '@/features/songs/ui/upload-asset'
 import { EditSongForm } from '@/features/songs/ui/edit-song-form'
 import { PdfViewer } from '@/shared/ui/media/pdf-viewer'
 import { AudioPlayer } from '@/shared/ui/media/audio-player'
+import { assetFileUrl, saveAssetWaveform } from '@/features/songs/ui/asset-audio'
 import { useConfirm } from '@/shared/ui/confirm-dialog'
 import { PLAYABLE_AUDIO_MIME_TYPES, SCORE_MIME_TYPES, guessAssetKind } from '@/features/songs/domain/song'
 import { getRouteApi } from '@tanstack/react-router'
@@ -37,6 +38,9 @@ type AssetWithGroups = {
   label: string | null
   status: string
   url: string | null
+  mimeType: string
+  peaks: Array<number> | null
+  durationMs: number | null
   groups: Array<{ id: string; name: string }>
 }
 
@@ -281,7 +285,15 @@ function AssetRow({
               asset.kind === 'score' ? (
                 <PdfViewer url={asset.url} media={media} />
               ) : (
-                <AudioPlayer url={asset.url} media={media} />
+                <AudioPlayer
+                  src={assetFileUrl(asset.id)}
+                  downloadUrl={asset.url}
+                  mimeType={asset.mimeType}
+                  peaks={asset.peaks}
+                  durationMs={asset.durationMs}
+                  media={media}
+                  saveWaveform={saveAssetWaveform(asset.id)}
+                />
               )
             ) : null}
           </DialogContent>

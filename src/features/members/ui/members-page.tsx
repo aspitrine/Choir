@@ -13,7 +13,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/primitives/table'
 import { TablePager } from '@/shared/ui/table-pager'
 import { useConfirm } from '@/shared/ui/confirm-dialog'
-import { createInviteFn, updateInviteFn, revokeInviteFn, updateMemberRoleFn, updateMemberGroupsFn, removeMemberFn } from '@/features/members/server/members.functions'
+import {
+  createInviteFn,
+  updateInviteFn,
+  revokeInviteFn,
+  updateMemberProfileFn,
+  updateMemberRoleFn,
+  updateMemberGroupsFn,
+  removeMemberFn,
+} from '@/features/members/server/members.functions'
 import { memberKeys, memberQueries } from '@/features/members/ui/queries'
 import { groupQueries } from '@/features/groups/ui/queries'
 import { isManagerRole, useRole } from '@/features/auth/ui/queries'
@@ -359,18 +367,24 @@ function EditMemberForm({
   const queryClient = useQueryClient()
   const memberId = row.member.id
   const canChangeRole = row.member.role !== 'owner' && !isSelf
+  const [name, setName] = useState(row.user.name)
+  const [email, setEmail] = useState(row.user.email)
   const [role, setRole] = useState(row.member.role)
   const [groupIds, setGroupIds] = useState(new Set(row.groups.map((g) => g.id)))
   const save = useMutation({
     mutationFn: async () => {
+      // First: the server refuses some email changes, and says why.
+      if (name.trim() !== row.user.name || email.trim().toLowerCase() !== row.user.email.toLowerCase()) {
+        await updateMemberProfileFn({ data: { memberId, name: name.trim(), email: email.trim() } })
+      }
       if (canChangeRole && role !== row.member.role) {
         await updateMemberRoleFn({ data: { memberId, role: role as InviteRole } })
       }
       await updateMemberGroupsFn({ data: { memberId, groupIds: [...groupIds] } })
     },
-    meta: { errorMessage: 'Enregistrement impossible', invalidates: [memberKeys.all] },
+    meta: { invalidates: [memberKeys.all] },
     onSuccess: onSaved,
-    // The role may have been saved before the groups failed: show what was stored.
+    // Some changes may have been saved before a later one failed: show what was stored.
     onError: () => queryClient.invalidateQueries({ queryKey: memberKeys.all }),
   })
 
@@ -383,6 +397,18 @@ function EditMemberForm({
       }}
     >
       <div className="space-y-1">
+        <Label htmlFor="member-name">Nom</Label>
+        <Input id="member-name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="member-email">Email</Label>
+        <Input id="member-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+        <p className="text-xs text-muted-foreground">
+          C'est l'identifiant de connexion du compte. Il ne peut pas être changé ici si la personne fait partie d'autres
+          chorales.
+        </p>
+      </div>
+      <div className="space-y-1">
         <Label htmlFor="member-role">Rôle</Label>
         {canChangeRole ? (
           <RoleSelect id="member-role" value={role as InviteRole} onChange={setRole} />
@@ -394,6 +420,7 @@ function EditMemberForm({
         )}
       </div>
       <GroupCheckboxes allGroups={allGroups} selected={groupIds} onChange={setGroupIds} />
+      {save.isError ? <p className="text-sm text-destructive">{save.error.message || 'Enregistrement impossible'}</p> : null}
       <Button type="submit" className="w-full" disabled={save.isPending}>
         {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
       </Button>
@@ -421,7 +448,7 @@ function EditInviteDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Modifier l'invitation</DialogTitle>
-          <DialogDescription>Le lien d'invitation reste le même</DialogDescription>
+          <DialogDescription>Le lien reste le même, sauf si l'email change</DialogDescription>
         </DialogHeader>
         <EditInviteForm invitation={invitation} groups={groups} allGroups={allGroups} onSaved={() => setOpen(false)} />
       </DialogContent>
@@ -442,6 +469,7 @@ function EditInviteForm({
 }) {
   const [firstName, setFirstName] = useState(invitation.firstName ?? '')
   const [lastName, setLastName] = useState(invitation.lastName ?? '')
+  const [email, setEmail] = useState(invitation.email)
   const [role, setRole] = useState(invitation.role as InviteRole)
   const [groupIds, setGroupIds] = useState(new Set(groups.map((g) => g.id)))
   const save = useMutation({
@@ -449,14 +477,18 @@ function EditInviteForm({
       updateInviteFn({
         data: {
           invitationId: invitation.id,
+          email: email.trim(),
           firstName: firstName.trim() || null,
           lastName: lastName.trim() || null,
           role,
           groupIds: [...groupIds],
         },
       }),
-    meta: { errorMessage: 'Enregistrement impossible', invalidates: [memberKeys.all] },
-    onSuccess: onSaved,
+    meta: { invalidates: [memberKeys.all] },
+    onSuccess: ({ linkChanged }) => {
+      if (linkChanged) toast.success('Nouveau lien d\'invitation : copiez-le pour l\'envoyer à la nouvelle adresse')
+      onSaved()
+    },
   })
 
   return (
@@ -479,13 +511,17 @@ function EditInviteForm({
       </div>
       <div className="space-y-1">
         <Label htmlFor="edit-invite-email">Email</Label>
-        <Input id="edit-invite-email" value={invitation.email} disabled />
+        <Input id="edit-invite-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+        {email.trim().toLowerCase() !== invitation.email.toLowerCase() ? (
+          <p className="text-xs text-muted-foreground">L'ancien lien ne fonctionnera plus : un nouveau lien sera créé.</p>
+        ) : null}
       </div>
       <div className="space-y-1">
         <Label htmlFor="edit-invite-role">Rôle</Label>
         <RoleSelect id="edit-invite-role" value={role} onChange={setRole} />
       </div>
       <GroupCheckboxes allGroups={allGroups} selected={groupIds} onChange={setGroupIds} />
+      {save.isError ? <p className="text-sm text-destructive">{save.error.message || 'Enregistrement impossible'}</p> : null}
       <Button type="submit" className="w-full" disabled={save.isPending}>
         {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
       </Button>

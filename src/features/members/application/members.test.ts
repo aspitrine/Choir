@@ -4,17 +4,18 @@ import { eq } from 'drizzle-orm'
 import { ForbiddenError, NotFoundError, ValidationError } from '@/shared/domain/errors'
 import { actorOf, createTestDb, fail, fakeAuthority, run, testLayer, type TestDb } from '@/test/db'
 import { seedGroup, seedMember, seedOrg, seedUser } from '@/test/fixtures'
-import { invitation, member } from '@/features/auth/infrastructure/schema'
+import { invitation, member, user } from '@/features/auth/infrastructure/schema'
 import { invitationGroup, memberGroup } from '../infrastructure/schema'
 import {
   acceptInvite,
   createInvite,
   finalizeAcceptance,
-  isInviteLinkUsed,
+  readInviteLink,
   searchInvitations,
   searchMembers,
   updateInvite,
   updateMemberGroups,
+  updateMemberProfile,
   updateMemberRole,
 } from './members'
 
@@ -143,7 +144,7 @@ describe('invitations', () => {
   it('edits a pending invitation, within the choir only', async () => {
     const { org, created, layer } = await invited()
     const alto = await seedGroup(t.db, org.id, 'Alto')
-    const edit = { invitationId: created.id, firstName: 'Jeanne', lastName: 'Martin', role: 'member' as const, groupIds: [alto.id] }
+    const edit = { invitationId: created.id, email: input.email, firstName: 'Jeanne', lastName: 'Martin', role: 'member' as const, groupIds: [alto.id] }
     await run(layer, updateInvite(actorOf(org.id), edit))
     const [row] = await t.db.select().from(invitation).where(eq(invitation.id, created.id))
     expect(row).toMatchObject({ firstName: 'Jeanne', lastName: 'Martin', role: 'member', email: input.email })
@@ -157,15 +158,34 @@ describe('invitations', () => {
     expect(await fail(layer, updateInvite(actorOf(org.id), edit))).toBeInstanceOf(NotFoundError)
   })
 
-  it('tells a used link apart, only with its secret', async () => {
-    const { created, singer, layer } = await invited()
-    expect(await run(layer, isInviteLinkUsed(created.id, created.secret))).toBe(false)
+  it('changes the invitation email with a new link, unless the email is already in the choir', async () => {
+    const { org, created, layer } = await invited()
+    const edit = { invitationId: created.id, email: 'Other@Test.local', firstName: null, lastName: null, role: 'member' as const, groupIds: [] }
+    expect(await run(layer, updateInvite(actorOf(org.id), { ...edit, email: input.email }))).toEqual({ linkChanged: false })
+    expect(await run(layer, readInviteLink(created.id, created.secret))).not.toBeNull()
+
+    expect(await run(layer, updateInvite(actorOf(org.id), edit))).toEqual({ linkChanged: true })
+    const [row] = await t.db.select().from(invitation).where(eq(invitation.id, created.id))
+    expect(row!.email).toBe('other@test.local')
+    // The link sent to the previous address is dead.
+    expect(await run(layer, readInviteLink(created.id, created.secret))).toBeNull()
+    expect(row!.secret).not.toBe(created.secret)
+
+    const taken = await seedUser(t.db, { email: 'taken@test.local' })
+    await seedMember(t.db, org.id, taken.id, 'member')
+    expect(await fail(layer, updateInvite(actorOf(org.id), { ...edit, email: 'TAKEN@test.local' }))).toBeInstanceOf(ValidationError)
+  })
+
+  it('reads a link (used or not, invitee name), only with its secret', async () => {
+    const { org, created, singer, layer } = await invited()
+    await run(layer, updateInvite(actorOf(org.id), { invitationId: created.id, email: input.email, firstName: 'Jeanne', lastName: 'Martin', role: 'member', groupIds: [] }))
+    expect(await run(layer, readInviteLink(created.id, created.secret))).toEqual({ used: false, inviteeName: 'Jeanne Martin' })
 
     await run(layer, acceptInvite(singer.id, created.id, created.secret))
-    expect(await run(layer, isInviteLinkUsed(created.id, created.secret))).toBe(true)
+    expect(await run(layer, readInviteLink(created.id, created.secret))).toMatchObject({ used: true })
     // The id alone reveals nothing about the invitation.
-    expect(await run(layer, isInviteLinkUsed(created.id, 'x'.repeat(created.secret.length)))).toBe(false)
-    expect(await run(layer, isInviteLinkUsed(crypto.randomUUID(), created.secret))).toBe(false)
+    expect(await run(layer, readInviteLink(created.id, 'x'.repeat(created.secret.length)))).toBeNull()
+    expect(await run(layer, readInviteLink(crypto.randomUUID(), created.secret))).toBeNull()
   })
 })
 
@@ -220,5 +240,48 @@ describe('member management', () => {
     expect(await fail(layer, updateMemberGroups(actorOf(org.id), theirs.id, [a.id]))).toBeInstanceOf(NotFoundError)
     expect(await fail(layer, updateMemberGroups(actorOf(org.id), mine.id, [foreign.id]))).toBeInstanceOf(NotFoundError)
     expect(await fail(layer, updateMemberGroups(actorOf(org.id, 'member'), mine.id, []))).toBeInstanceOf(ForbiddenError)
+  })
+})
+
+describe('updateMemberProfile', () => {
+  const layer = () => testLayer(t)
+  const accountOf = async (userId: string) => (await t.db.select().from(user).where(eq(user.id, userId)))[0]!
+
+  it('renames any member, and changes the email of one in this choir only', async () => {
+    const org = await seedOrg(t.db)
+    const singer = await seedUser(t.db, { email: 'singer@test.local', emailVerified: true })
+    const m = await seedMember(t.db, org.id, singer.id, 'member')
+    await run(layer(), updateMemberProfile(actorOf(org.id, 'admin'), { memberId: m.id, name: 'Jeanne Martin', email: 'New@Test.local' }))
+    expect(await accountOf(singer.id)).toMatchObject({ name: 'Jeanne Martin', email: 'new@test.local', emailVerified: false })
+
+    // Same email, other case: not a change.
+    await run(layer(), updateMemberProfile(actorOf(org.id, 'admin'), { memberId: m.id, name: 'J. Martin', email: 'NEW@test.local' }))
+    expect(await accountOf(singer.id)).toMatchObject({ name: 'J. Martin', email: 'new@test.local' })
+  })
+
+  it('refuses an email change that could hand over an account', async () => {
+    const org = await seedOrg(t.db, 'A')
+    const elsewhere = await seedOrg(t.db, 'B')
+    const multi = await seedUser(t.db, { email: 'multi@test.local' })
+    const mMulti = await seedMember(t.db, org.id, multi.id, 'member')
+    await seedMember(t.db, elsewhere.id, multi.id, 'member')
+    const owner = await seedUser(t.db, { email: 'owner@test.local' })
+    const mOwner = await seedMember(t.db, org.id, owner.id, 'owner')
+    const single = await seedMember(t.db, org.id, (await seedUser(t.db)).id, 'member')
+    await seedUser(t.db, { email: 'taken@test.local' })
+    const admin = actorOf(org.id, 'admin')
+
+    expect(await fail(layer(), updateMemberProfile(admin, { memberId: mMulti.id, name: 'X', email: 'x@test.local' }))).toBeInstanceOf(ValidationError)
+    // Renaming is still fine.
+    await run(layer(), updateMemberProfile(admin, { memberId: mMulti.id, name: 'Multi', email: 'multi@test.local' }))
+    expect(await accountOf(multi.id)).toMatchObject({ name: 'Multi', email: 'multi@test.local' })
+
+    expect(await fail(layer(), updateMemberProfile(admin, { memberId: mOwner.id, name: 'O', email: 'mine@test.local' }))).toBeInstanceOf(ValidationError)
+    await run(layer(), updateMemberProfile(actorOf(org.id, 'owner', owner.id), { memberId: mOwner.id, name: 'O', email: 'mine@test.local' }))
+    expect(await accountOf(owner.id)).toMatchObject({ email: 'mine@test.local' })
+
+    expect(await fail(layer(), updateMemberProfile(admin, { memberId: single.id, name: 'S', email: 'Taken@test.local' }))).toBeInstanceOf(ValidationError)
+    expect(await fail(layer(), updateMemberProfile(actorOf(org.id, 'member'), { memberId: single.id, name: 'S', email: 's@test.local' }))).toBeInstanceOf(ForbiddenError)
+    expect(await fail(layer(), updateMemberProfile(actorOf(elsewhere.id), { memberId: single.id, name: 'S', email: 's@test.local' }))).toBeInstanceOf(NotFoundError)
   })
 })

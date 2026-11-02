@@ -1,9 +1,10 @@
 import { Effect } from 'effect'
+import { NotFoundError } from '@/shared/domain/errors'
 import { FileStorage, removeObjects } from '@/shared/application/file-storage'
 import { requireManager } from '@/features/auth/application/access'
 import type { Actor } from '@/features/auth/domain/roles'
 import { requireOrgGroups } from '@/features/groups/application/groups'
-import { STALE_UPLOAD_MS, storageKeyFor } from '../domain/asset'
+import { STALE_UPLOAD_MS, storageKeyFor, type AudioWaveform } from '../domain/asset'
 import type { CreateUploadIntentInput } from '../domain/song'
 import { AssetRepository, SongRepository } from './ports'
 
@@ -43,15 +44,48 @@ export const createUploadIntent = (actor: Actor, input: CreateUploadIntentInput)
     return { assetId, uploadUrl }
   })
 
-/** Marks an upload as ready, with the size and type storage actually holds. */
-export const confirmUpload = (actor: Actor, assetId: string) =>
+/**
+ * Marks an upload as ready, with the size and type storage actually holds, and
+ * the waveform the browser computed for an audio file (none if it couldn't).
+ */
+export const confirmUpload = (actor: Actor, assetId: string, waveform: AudioWaveform | null = null) =>
   Effect.gen(function* () {
     yield* requireManager(actor)
     const assets = yield* AssetRepository
     const storage = yield* FileStorage
     const asset = yield* assets.findOwned(actor.orgId, assetId)
     const meta = yield* storage.head(asset.storageKey)
-    return yield* assets.markReady(assetId, { sizeBytes: meta.sizeBytes, mimeType: meta.contentType })
+    return yield* assets.markReady(assetId, {
+      sizeBytes: meta.sizeBytes,
+      mimeType: meta.contentType,
+      waveform: asset.kind === 'audio' ? waveform : null,
+    })
+  })
+
+/**
+ * Waveform of a file uploaded before waveforms existed, computed by its first
+ * listener: any member may send it, but only while the file has none, so a
+ * stored waveform is never replaced.
+ */
+export const saveMissingWaveform = (actor: Actor, assetId: string, waveform: AudioWaveform) =>
+  Effect.gen(function* () {
+    const assets = yield* AssetRepository
+    yield* assets.findOwned(actor.orgId, assetId)
+    yield* assets.saveMissingWaveform(assetId, waveform)
+  })
+
+/**
+ * A presigned URL for one file of the choir. Backs a stable per-file address
+ * the player can keep for hours: each request (incl. the range requests of a
+ * seek, or a resume after the phone slept) gets a URL signed just now.
+ */
+export const getAssetUrl = (actor: Actor, assetId: string) =>
+  Effect.gen(function* () {
+    const assets = yield* AssetRepository
+    const storage = yield* FileStorage
+    const asset = yield* assets.findOwned(actor.orgId, assetId)
+    if (asset.status !== 'ready') return yield* Effect.fail(new NotFoundError({ entity: 'asset', id: assetId }))
+    return yield* storage.presignGet(asset.storageKey)
   })
 
 /** Object first, so a storage failure leaves the row to retry from. */

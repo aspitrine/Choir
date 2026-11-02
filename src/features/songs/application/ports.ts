@@ -3,7 +3,7 @@ import type { NotFoundError } from '@/shared/domain/errors'
 import type { Page, PageParams } from '@/shared/domain/pagination'
 import type { Group } from '@/features/groups/application/ports'
 import type { CreateSongInput, Song } from '../domain/song'
-import type { Asset } from '../domain/asset'
+import type { Asset, AudioWaveform } from '../domain/asset'
 
 export type { Asset, Song }
 
@@ -38,7 +38,12 @@ export class AssetRepository extends Context.Tag('AssetRepository')<
     /** The asset, only if its song belongs to the organization. */
     readonly findOwned: (orgId: string, assetId: string) => Effect.Effect<Asset, NotFoundError>
     readonly insertPending: (asset: PendingAsset, groupIds: ReadonlyArray<string>) => Effect.Effect<void>
-    readonly markReady: (assetId: string, meta: { sizeBytes: number; mimeType: string }) => Effect.Effect<Asset>
+    readonly markReady: (
+      assetId: string,
+      meta: { sizeBytes: number; mimeType: string; waveform: AudioWaveform | null },
+    ) => Effect.Effect<Asset>
+    /** Stores the waveform of an audio file that has none yet; never overwrites one. */
+    readonly saveMissingWaveform: (assetId: string, waveform: AudioWaveform) => Effect.Effect<void>
     readonly remove: (assetId: string) => Effect.Effect<void>
     readonly removeMany: (assetIds: ReadonlyArray<string>) => Effect.Effect<void>
     readonly removeForSong: (songId: string) => Effect.Effect<void>

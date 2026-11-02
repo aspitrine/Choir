@@ -70,6 +70,8 @@ export const getPublicPlaylist = (token: string) =>
                 kind: a.kind,
                 label: a.label,
                 mimeType: a.mimeType,
+                peaks: a.peaks,
+                durationMs: a.durationMs,
                 status: a.status,
                 groups: a.groups,
                 url,

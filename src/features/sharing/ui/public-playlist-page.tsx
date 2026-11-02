@@ -3,7 +3,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/shared/ui/primit
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/primitives/dialog'
 import { PdfViewer } from '@/shared/ui/media/pdf-viewer'
 import { AudioPlayer } from '@/shared/ui/media/audio-player'
-import { SharedBundles } from '@/features/sharing/ui/shared-bundles'
+import { SharedBundles, publicFileUrl } from '@/features/sharing/ui/shared-bundles'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { publicQueries } from '@/features/sharing/ui/queries'
 import { getRouteApi } from '@tanstack/react-router'
@@ -113,7 +113,14 @@ export function PublicPlaylistPage() {
                     {a.kind === 'score' ? (
                       <PdfViewer url={a.url} media={mediaOf(selected, a)} />
                     ) : (
-                      <AudioPlayer url={a.url} media={mediaOf(selected, a)} />
+                      <AudioPlayer
+                        src={publicFileUrl(token, a.id)}
+                        downloadUrl={a.url}
+                        mimeType={a.mimeType}
+                        peaks={a.peaks}
+                        durationMs={a.durationMs}
+                        media={mediaOf(selected, a)}
+                      />
                     )}
                     <a
                       href={a.url}

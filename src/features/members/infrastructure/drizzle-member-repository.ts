@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { and, asc, count, desc, eq, ilike, inArray, or } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm'
 import { Database } from '@/shared/infrastructure/db/database'
 import { PAGE_SIZE, containsPattern } from '@/shared/domain/pagination'
 import { invitation, member, user } from '@/features/auth/infrastructure/schema'
@@ -115,12 +115,49 @@ export const DrizzleMemberRepository = Layer.effect(
         }
       }),
 
-    updatePendingInvitation: (orgId, invitationId, { firstName, lastName, role, groupIds }) =>
+    findPendingInvitation: (orgId, invitationId) =>
+      Effect.promise(() =>
+        db
+          .select()
+          .from(invitation)
+          .where(
+            and(eq(invitation.id, invitationId), eq(invitation.organizationId, orgId), eq(invitation.status, 'pending')),
+          )
+          .limit(1),
+      ).pipe(Effect.map(([row]) => row ?? null)),
+
+    isEmailInOrg: (orgId, email, exceptInvitationId) =>
+      Effect.promise(async () => {
+        const normalized = email.toLowerCase()
+        const [asMember, asInvite] = await Promise.all([
+          db
+            .select({ id: member.id })
+            .from(member)
+            .innerJoin(user, eq(user.id, member.userId))
+            .where(and(eq(member.organizationId, orgId), eq(sql`lower(${user.email})`, normalized)))
+            .limit(1),
+          db
+            .select({ id: invitation.id })
+            .from(invitation)
+            .where(
+              and(
+                eq(invitation.organizationId, orgId),
+                eq(invitation.status, 'pending'),
+                ne(invitation.id, exceptInvitationId),
+                eq(sql`lower(${invitation.email})`, normalized),
+              ),
+            )
+            .limit(1),
+        ])
+        return asMember.length > 0 || asInvite.length > 0
+      }),
+
+    updatePendingInvitation: (orgId, invitationId, { firstName, lastName, email, secret, role, groupIds }) =>
       Effect.promise(() =>
         db.transaction(async (tx) => {
           const updated = await tx
             .update(invitation)
-            .set({ firstName, lastName, role })
+            .set({ firstName, lastName, email, role, ...(secret ? { secret } : {}) })
             .where(
               and(
                 eq(invitation.id, invitationId),
@@ -138,10 +175,45 @@ export const DrizzleMemberRepository = Layer.effect(
         }),
       ),
 
+    findMemberAccount: (orgId, memberId) =>
+      Effect.promise(async () => {
+        const [row] = await db
+          .select({ userId: user.id, role: member.role, name: user.name, email: user.email })
+          .from(member)
+          .innerJoin(user, eq(user.id, member.userId))
+          .where(and(eq(member.id, memberId), eq(member.organizationId, orgId)))
+          .limit(1)
+        if (!row) return null
+        const [{ orgCount }] = await db.select({ orgCount: count() }).from(member).where(eq(member.userId, row.userId))
+        return { ...row, orgCount }
+      }),
+
+    isEmailTaken: (email, exceptUserId) =>
+      Effect.promise(() =>
+        db
+          .select({ id: user.id })
+          .from(user)
+          .where(and(eq(sql`lower(${user.email})`, email.toLowerCase()), ne(user.id, exceptUserId)))
+          .limit(1),
+      ).pipe(Effect.map((rows) => rows.length > 0)),
+
+    updateAccount: (userId, { name, email }) =>
+      Effect.promise(() =>
+        db
+          .update(user)
+          .set({ name, updatedAt: new Date(), ...(email ? { email, emailVerified: false } : {}) })
+          .where(eq(user.id, userId)),
+      ).pipe(Effect.asVoid),
+
     findInvitationLink: (invitationId) =>
       Effect.promise(() =>
         db
-          .select({ secret: invitation.secret, status: invitation.status })
+          .select({
+            secret: invitation.secret,
+            status: invitation.status,
+            firstName: invitation.firstName,
+            lastName: invitation.lastName,
+          })
           .from(invitation)
           .where(eq(invitation.id, invitationId))
           .limit(1),

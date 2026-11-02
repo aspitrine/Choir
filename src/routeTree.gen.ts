@@ -21,6 +21,7 @@ import { Route as AuthedPlaylistsPlaylistIdRouteImport } from './routes/_authed/
 import { Route as AuthedSongsIndexRouteImport } from './routes/_authed/songs/index'
 import { Route as AuthedSongsSongIdRouteImport } from './routes/_authed/songs/$songId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiFilesAssetIdRouteImport } from './routes/api/files/$assetId'
 import { Route as ApiPublicTokenFilesAssetIdRouteImport } from './routes/api/public/$token/files/$assetId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -84,6 +85,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiFilesAssetIdRoute = ApiFilesAssetIdRouteImport.update({
+  id: '/api/files/$assetId',
+  path: '/api/files/$assetId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicTokenFilesAssetIdRoute =
   ApiPublicTokenFilesAssetIdRouteImport.update({
     id: '/api/public/$token/files/$assetId',
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/playlists/$playlistId': typeof AuthedPlaylistsPlaylistIdRoute
   '/songs/$songId': typeof AuthedSongsSongIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/files/$assetId': typeof ApiFilesAssetIdRoute
   '/groups/': typeof AuthedGroupsIndexRoute
   '/members/': typeof AuthedMembersIndexRoute
   '/playlists/': typeof AuthedPlaylistsIndexRoute
@@ -113,6 +120,7 @@ export interface FileRoutesByTo {
   '/playlists/$playlistId': typeof AuthedPlaylistsPlaylistIdRoute
   '/songs/$songId': typeof AuthedSongsSongIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/files/$assetId': typeof ApiFilesAssetIdRoute
   '/groups': typeof AuthedGroupsIndexRoute
   '/members': typeof AuthedMembersIndexRoute
   '/playlists': typeof AuthedPlaylistsIndexRoute
@@ -129,6 +137,7 @@ export interface FileRoutesById {
   '/_authed/playlists/$playlistId': typeof AuthedPlaylistsPlaylistIdRoute
   '/_authed/songs/$songId': typeof AuthedSongsSongIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/files/$assetId': typeof ApiFilesAssetIdRoute
   '/_authed/groups/': typeof AuthedGroupsIndexRoute
   '/_authed/members/': typeof AuthedMembersIndexRoute
   '/_authed/playlists/': typeof AuthedPlaylistsIndexRoute
@@ -145,6 +154,7 @@ export interface FileRouteTypes {
     | '/playlists/$playlistId'
     | '/songs/$songId'
     | '/api/auth/$'
+    | '/api/files/$assetId'
     | '/groups/'
     | '/members/'
     | '/playlists/'
@@ -159,6 +169,7 @@ export interface FileRouteTypes {
     | '/playlists/$playlistId'
     | '/songs/$songId'
     | '/api/auth/$'
+    | '/api/files/$assetId'
     | '/groups'
     | '/members'
     | '/playlists'
@@ -174,6 +185,7 @@ export interface FileRouteTypes {
     | '/_authed/playlists/$playlistId'
     | '/_authed/songs/$songId'
     | '/api/auth/$'
+    | '/api/files/$assetId'
     | '/_authed/groups/'
     | '/_authed/members/'
     | '/_authed/playlists/'
@@ -187,6 +199,7 @@ export interface RootRouteChildren {
   AcceptInviteInvitationIdRoute: typeof AcceptInviteInvitationIdRoute
   STokenRoute: typeof STokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiFilesAssetIdRoute: typeof ApiFilesAssetIdRoute
   ApiPublicTokenFilesAssetIdRoute: typeof ApiPublicTokenFilesAssetIdRoute
 }
 
@@ -276,6 +289,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/files/$assetId': {
+      id: '/api/files/$assetId'
+      path: '/api/files/$assetId'
+      fullPath: '/api/files/$assetId'
+      preLoaderRoute: typeof ApiFilesAssetIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/$token/files/$assetId': {
       id: '/api/public/$token/files/$assetId'
       path: '/api/public/$token/files/$assetId'
@@ -315,6 +335,7 @@ const rootRouteChildren: RootRouteChildren = {
   AcceptInviteInvitationIdRoute: AcceptInviteInvitationIdRoute,
   STokenRoute: STokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiFilesAssetIdRoute: ApiFilesAssetIdRoute,
   ApiPublicTokenFilesAssetIdRoute: ApiPublicTokenFilesAssetIdRoute,
 }
 export const routeTree = rootRouteImport

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { confirmUploadFn, createUploadIntentFn, deleteAssetFn } from '@/features/songs/server/assets.functions'
 import { uploadAsset } from '@/features/songs/ui/upload-asset'
+import { computeWaveform } from '@/shared/ui/media/waveform-peaks'
 
+vi.mock('@/shared/ui/media/waveform-peaks', () => ({ computeWaveform: vi.fn() }))
 vi.mock('@/features/songs/server/assets.functions', () => ({
   createUploadIntentFn: vi.fn(),
   confirmUploadFn: vi.fn(),
@@ -20,8 +22,9 @@ beforeEach(() => {
 })
 
 describe('uploadAsset', () => {
-  it('reserves, sends the bytes to storage, then confirms', async () => {
+  it('reserves, sends the bytes to storage, then confirms with the waveform', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 200 }))
+    vi.mocked(computeWaveform).mockResolvedValue({ peaks: [0.5, 1], durationMs: 1000 })
     vi.mocked(confirmUploadFn).mockResolvedValue({ id: 'a1', status: 'ready' } as never)
 
     await expect(uploadAsset(input)).resolves.toMatchObject({ id: 'a1' })
@@ -40,8 +43,21 @@ describe('uploadAsset', () => {
       body: file,
       headers: { 'Content-Type': 'audio/mpeg' },
     })
-    expect(confirmUploadFn).toHaveBeenCalledWith({ data: { assetId: 'a1' } })
+    expect(confirmUploadFn).toHaveBeenCalledWith({ data: { assetId: 'a1', waveform: { peaks: [0.5, 1], durationMs: 1000 } } })
     expect(deleteAssetFn).not.toHaveBeenCalled()
+  })
+
+  it('still uploads when the waveform fails, and never computes one for a score', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }))
+    vi.mocked(confirmUploadFn).mockResolvedValue({ id: 'a1', status: 'ready' } as never)
+    vi.mocked(computeWaveform).mockRejectedValue(new Error('decode'))
+    await uploadAsset(input)
+    expect(confirmUploadFn).toHaveBeenLastCalledWith({ data: { assetId: 'a1', waveform: null } })
+
+    vi.mocked(computeWaveform).mockClear()
+    await uploadAsset({ ...input, file: new File(['%PDF'], 'Partition.pdf', { type: 'application/pdf' }) })
+    expect(computeWaveform).not.toHaveBeenCalled()
+    expect(confirmUploadFn).toHaveBeenLastCalledWith({ data: { assetId: 'a1', waveform: null } })
   })
 
   it('deletes the pending asset when storage refuses the bytes', async () => {
