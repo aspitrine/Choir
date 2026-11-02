@@ -17,6 +17,9 @@ export class PlaylistRepository extends Context.Tag('PlaylistRepository')<
     readonly list: (orgId: string) => Effect.Effect<Array<Playlist>>
     readonly get: (orgId: string, playlistId: string) => Effect.Effect<Playlist, NotFoundError>
     readonly create: (orgId: string, input: CreatePlaylistInput) => Effect.Effect<Playlist>
+    readonly update: (playlistId: string, input: CreatePlaylistInput) => Effect.Effect<Playlist>
+    /** Creates a playlist with the source's description and songs, in the same order, atomically. */
+    readonly duplicate: (orgId: string, sourceId: string, name: string) => Effect.Effect<Playlist>
     readonly remove: (playlistId: string) => Effect.Effect<void>
     readonly listItems: (playlistId: string) => Effect.Effect<Array<PlaylistItem>>
     readonly itemIds: (playlistId: string) => Effect.Effect<Array<string>>

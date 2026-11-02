@@ -37,6 +37,32 @@ export const DrizzlePlaylistRepository = Layer.effect(
         db.insert(playlist).values({ id: crypto.randomUUID(), organizationId: orgId, name, description }).returning(),
       ).pipe(Effect.map(([row]) => row!)),
 
+    update: (playlistId, { name, description }) =>
+      Effect.promise(() =>
+        db.update(playlist).set({ name, description }).where(eq(playlist.id, playlistId)).returning(),
+      ).pipe(Effect.map(([row]) => row!)),
+
+    duplicate: (orgId, sourceId, name) =>
+      Effect.promise(() =>
+        db.transaction(async (tx) => {
+          const [source] = await tx.select().from(playlist).where(eq(playlist.id, sourceId))
+          const [copy] = await tx
+            .insert(playlist)
+            .values({ id: crypto.randomUUID(), organizationId: orgId, name, description: source!.description })
+            .returning()
+          const items = await tx
+            .select({ songId: playlistItem.songId, position: playlistItem.position })
+            .from(playlistItem)
+            .where(eq(playlistItem.playlistId, sourceId))
+          if (items.length > 0) {
+            await tx
+              .insert(playlistItem)
+              .values(items.map((i) => ({ id: crypto.randomUUID(), playlistId: copy!.id, ...i })))
+          }
+          return copy!
+        }),
+      ),
+
     remove: (playlistId) =>
       Effect.promise(() => db.delete(playlist).where(eq(playlist.id, playlistId))).pipe(Effect.asVoid),
 

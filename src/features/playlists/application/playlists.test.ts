@@ -7,12 +7,14 @@ import {
   addSongToPlaylist,
   createPlaylist,
   deletePlaylist,
+  duplicatePlaylist,
   getPlaylistDetail,
   listPlaylists,
   listUpcomingPlaylists,
   removeEventDate,
   removePlaylistItem,
   reorderPlaylist,
+  updatePlaylist,
 } from './playlists'
 
 let t: TestDb
@@ -86,6 +88,35 @@ describe('playlists', () => {
     expect(titles((await run(layer, getPlaylistDetail(actorOf(org.id), p.id))).items)).toEqual(['A', 'B', 'C'])
   })
 
+  it('renames a playlist and edits its description', async () => {
+    const org = await seedOrg(t.db)
+    const actor = actorOf(org.id)
+    const p = await seedPlaylist(t.db, org.id, 'Noël')
+    await run(layer, updatePlaylist(actor, p.id, { name: 'Messe de Noël', description: 'Minuit' }))
+    expect((await run(layer, getPlaylistDetail(actor, p.id))).playlist).toMatchObject({
+      name: 'Messe de Noël',
+      description: 'Minuit',
+    })
+  })
+
+  it('duplicates a playlist with its songs in order, but not its dates', async () => {
+    const org = await seedOrg(t.db)
+    const actor = actorOf(org.id)
+    const songs = [await seedSong(t.db, org.id, 'A'), await seedSong(t.db, org.id, 'B'), await seedSong(t.db, org.id, 'C')]
+    const source = await seedPlaylist(t.db, org.id, 'Noël 2025', [songs[2]!.id, songs[0]!.id, songs[1]!.id])
+    await run(layer, addEventDate(actor, source.id, new Date()))
+
+    const copy = await run(layer, duplicatePlaylist(actor, { playlistId: source.id, name: 'Noël 2026' }))
+    const detail = await run(layer, getPlaylistDetail(actor, copy.id))
+    expect(detail.playlist).toMatchObject({ name: 'Noël 2026', organizationId: org.id })
+    expect(titles(detail.items)).toEqual(['C', 'A', 'B'])
+    expect(detail.eventDates).toEqual([])
+
+    // The copy is independent: editing it leaves the source untouched.
+    await run(layer, removePlaylistItem(actor, copy.id, detail.items[0]!.itemId))
+    expect(titles((await run(layer, getPlaylistDetail(actor, source.id))).items)).toEqual(['C', 'A', 'B'])
+  })
+
   it('refuses writes from members and from other choirs', async () => {
     const org = await seedOrg(t.db, 'A')
     const other = actorOf((await seedOrg(t.db, 'B')).id)
@@ -100,6 +131,8 @@ describe('playlists', () => {
       expect(await fail(layer, reorderPlaylist(actor, p.id, []))).toBeInstanceOf(error)
       expect(await fail(layer, addEventDate(actor, p.id, new Date()))).toBeInstanceOf(error)
       expect(await fail(layer, deletePlaylist(actor, p.id))).toBeInstanceOf(error)
+      expect(await fail(layer, updatePlaylist(actor, p.id, { name: 'X', description: null }))).toBeInstanceOf(error)
+      expect(await fail(layer, duplicatePlaylist(actor, { playlistId: p.id, name: 'X' }))).toBeInstanceOf(error)
     }
     expect(await fail(layer, createPlaylist(singer, { name: 'X', description: null }))).toBeInstanceOf(ForbiddenError)
   })

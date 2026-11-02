@@ -141,7 +141,12 @@ test('singers get per-voice looping playlists and merged scores', async ({ page,
 
   const block = (audience: string) =>
     pub.locator('div.rounded-md.border').filter({ has: pub.getByRole('heading', { name: audience, exact: true }) })
-  await expect(block('Tout le monde').locator('audio')).toHaveAttribute('src', /Tutti\.mp3/)
+  // Audio plays from a stable address that redirects to a freshly presigned URL.
+  const audio = block('Tout le monde').locator('audio')
+  await expect(audio).toHaveAttribute('src', /^\/api\/public\/[\w-]+\/files\/[\w-]+$/)
+  const redirect = await pub.request.get((await audio.getAttribute('src'))!, { maxRedirects: 0 })
+  expect(redirect.status()).toBe(302)
+  expect(redirect.headers().location).toMatch(/Tutti\.mp3/)
   await expect(block(basse).locator('audio')).toHaveCount(0)
 
   // Merging fetches the PDFs straight from object storage.
@@ -178,4 +183,51 @@ test('a revoked link stops working', async ({ page, browser }) => {
   await pub.goto(url)
   await expect(pub.getByText('Lien introuvable')).toBeVisible()
   await singer.close()
+})
+
+test('director edits a song from its page', async ({ page }) => {
+  await gotoHydrated(page, '/songs')
+  await page.getByRole('link', { name: songTitle }).click()
+  await expect(page.getByRole('heading', { name: songTitle })).toBeVisible()
+
+  await page.locator('header').getByRole('button', { name: 'Modifier' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Modifier le chant' })
+  await dialog.getByLabel('Tonalité').fill('Ré majeur')
+  await dialog.getByRole('button', { name: 'Enregistrer' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText('Tonalité : Ré majeur')).toBeVisible()
+})
+
+test('director renames a playlist, then duplicates it with its songs', async ({ page }) => {
+  const renamed = `${playlistName} bis`
+  await gotoHydrated(page, playlistUrl)
+  await page.locator('header').getByRole('button', { name: 'Modifier' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Modifier la playlist' })
+  await dialog.getByLabel('Nom').fill(renamed)
+  await dialog.getByRole('button', { name: 'Enregistrer' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('heading', { name: renamed })).toBeVisible()
+
+  await gotoHydrated(page, '/playlists')
+  await page.getByRole('row', { name: renamed }).getByRole('button', { name: 'Dupliquer' }).click()
+  const duplicate = page.getByRole('dialog', { name: 'Dupliquer la playlist' })
+  await expect(duplicate.getByLabel('Nom de la nouvelle playlist')).toHaveValue(`${renamed} (copie)`)
+  await duplicate.getByRole('button', { name: 'Dupliquer' }).click()
+
+  await expect(page.getByRole('heading', { name: `${renamed} (copie)` })).toBeVisible()
+  await expect(page.getByText('2 chant(s)')).toBeVisible()
+  await expect(page.getByText('Aucune date planifiée')).toBeVisible()
+})
+
+test('director renames the choir', async ({ page }) => {
+  await gotoHydrated(page, '/members')
+  const rename = async (name: string) => {
+    await page.getByLabel('Nom de la chorale').fill(name)
+    await page.getByRole('button', { name: 'Renommer' }).click()
+    await expect(page.getByText('Nom enregistré')).toBeVisible()
+    await expect(page.getByRole('button', { name: new RegExp(name) })).toBeVisible()
+  }
+  await rename(`Chorale ${run}`)
+  // Other specs rely on the seeded name.
+  await rename('Chorale E2E')
 })

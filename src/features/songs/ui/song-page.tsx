@@ -22,6 +22,7 @@ import { groupQueries } from '@/features/groups/ui/queries'
 import { playlistKeys } from '@/features/playlists/ui/queries'
 import { useIsManager } from '@/features/auth/ui/queries'
 import { uploadAsset } from '@/features/songs/ui/upload-asset'
+import { EditSongForm } from '@/features/songs/ui/edit-song-form'
 import { PdfViewer } from '@/shared/ui/media/pdf-viewer'
 import { AudioPlayer } from '@/shared/ui/media/audio-player'
 import { useConfirm } from '@/shared/ui/confirm-dialog'
@@ -61,18 +62,38 @@ export function SongDetailPage() {
   })
   const confirm = useConfirm()
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
 
   return (
     <div className="w-full space-y-6 p-8">
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold">{song.title}</h1>
-          {song.composer ? (
-            <p className="text-sm text-muted-foreground">{song.composer}</p>
+          {song.composer || song.arranger ? (
+            <p className="text-sm text-muted-foreground">
+              {[song.composer, song.arranger].filter(Boolean).join(' · ')}
+            </p>
+          ) : null}
+          {song.key || song.tempo ? (
+            <p className="flex gap-4 text-sm text-muted-foreground">
+              {song.key ? <span>Tonalité : {song.key}</span> : null}
+              {song.tempo ? <span>Tempo : {song.tempo}</span> : null}
+            </p>
           ) : null}
         </div>
         {isManager ? (
           <div className="flex gap-2">
+            <Dialog open={editOpen} onOpenChange={setEditOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">Modifier</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Modifier le chant</DialogTitle>
+                </DialogHeader>
+                <EditSongForm song={song} onSaved={() => setEditOpen(false)} />
+              </DialogContent>
+            </Dialog>
             <Button
               variant="destructive"
               onClick={async () => {

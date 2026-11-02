@@ -3,18 +3,20 @@ import { Schema } from 'effect'
 import { Id } from '@/shared/domain/schemas'
 import { decodeInput } from '@/shared/server/request'
 import { withActor } from '@/app/runtime'
-import { CreatePlaylistInput } from '../domain/playlist'
+import { CreatePlaylistInput, DuplicatePlaylistInput, UpdatePlaylistInput } from '../domain/playlist'
 import {
   addEventDate,
   addSongToPlaylist,
   createPlaylist,
   deletePlaylist,
+  duplicatePlaylist,
   getPlaylistDetail,
   listPlaylists,
   listUpcomingPlaylists,
   removeEventDate,
   removePlaylistItem,
   reorderPlaylist,
+  updatePlaylist,
 } from '../application/playlists'
 
 const ByPlaylist = Schema.Struct({ playlistId: Id })
@@ -30,6 +32,14 @@ export const getPlaylistFn = createServerFn({ method: 'GET' })
 export const createPlaylistFn = createServerFn({ method: 'POST' })
   .validator(decodeInput(CreatePlaylistInput))
   .handler(({ data }) => withActor((actor) => createPlaylist(actor, data)))
+
+export const updatePlaylistFn = createServerFn({ method: 'POST' })
+  .validator(decodeInput(UpdatePlaylistInput))
+  .handler(({ data: { playlistId, ...input } }) => withActor((actor) => updatePlaylist(actor, playlistId, input)))
+
+export const duplicatePlaylistFn = createServerFn({ method: 'POST' })
+  .validator(decodeInput(DuplicatePlaylistInput))
+  .handler(({ data }) => withActor((actor) => duplicatePlaylist(actor, data)))
 
 export const deletePlaylistFn = createServerFn({ method: 'POST' })
   .validator(decodeInput(ByPlaylist))

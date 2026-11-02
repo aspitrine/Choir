@@ -4,7 +4,7 @@ import { requireManager } from '@/features/auth/application/access'
 import type { Actor } from '@/features/auth/domain/roles'
 import { SongRepository } from '@/features/songs/application/ports'
 import { isPermutationOf } from '../domain/ordering'
-import type { CreatePlaylistInput } from '../domain/playlist'
+import type { CreatePlaylistInput, DuplicatePlaylistInput } from '../domain/playlist'
 import { selectUpcoming } from '../domain/upcoming'
 import { PlaylistRepository } from './ports'
 
@@ -42,6 +42,19 @@ export const createPlaylist = (actor: Actor, input: CreatePlaylistInput) =>
     yield* requireManager(actor)
     const playlists = yield* PlaylistRepository
     return yield* playlists.create(actor.orgId, input)
+  })
+
+export const updatePlaylist = (actor: Actor, playlistId: string, input: CreatePlaylistInput) =>
+  Effect.gen(function* () {
+    yield* managedPlaylist(actor, playlistId)
+    return yield* Effect.flatMap(PlaylistRepository, (playlists) => playlists.update(playlistId, input))
+  })
+
+/** A starting point for a new event: same songs in the same order; dates and share links are not copied. */
+export const duplicatePlaylist = (actor: Actor, { playlistId, name }: DuplicatePlaylistInput) =>
+  Effect.gen(function* () {
+    yield* managedPlaylist(actor, playlistId)
+    return yield* Effect.flatMap(PlaylistRepository, (playlists) => playlists.duplicate(actor.orgId, playlistId, name))
   })
 
 export const deletePlaylist = (actor: Actor, playlistId: string) =>

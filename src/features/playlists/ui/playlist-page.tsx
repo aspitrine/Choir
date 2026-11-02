@@ -8,7 +8,7 @@ import { Button } from '@/shared/ui/primitives/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/primitives/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/shared/ui/primitives/dialog'
 import { Input } from '@/shared/ui/primitives/input'
-import { deletePlaylistFn, addSongToPlaylistFn, removePlaylistItemFn, reorderPlaylistFn, addEventDateFn, removeEventDateFn } from '@/features/playlists/server/playlists.functions'
+import { deletePlaylistFn, updatePlaylistFn, addSongToPlaylistFn, removePlaylistItemFn, reorderPlaylistFn, addEventDateFn, removeEventDateFn } from '@/features/playlists/server/playlists.functions'
 import { playlistKeys, playlistQueries } from '@/features/playlists/ui/queries'
 import { groupQueries } from '@/features/groups/ui/queries'
 import { useIsManager } from '@/features/auth/ui/queries'
@@ -18,6 +18,8 @@ import { ShareLinksCard } from '@/features/sharing/ui/share-links-card'
 import { EditSongForm, type EditableSong } from '@/features/songs/ui/edit-song-form'
 import { SongDetailsDialog } from '@/features/songs/ui/song-details-dialog'
 import { AddSongTable } from '@/features/songs/ui/song-picker'
+import { useAppForm } from '@/shared/ui/form/form'
+import { PlaylistDetailsForm } from '@/features/playlists/domain/playlist'
 
 const routeApi = getRouteApi('/_authed/playlists/$playlistId')
 
@@ -42,6 +44,8 @@ export function PlaylistDetailPage() {
     },
   })
 
+  const [editOpen, setEditOpen] = useState(false)
+
   const songIdsInPlaylist = new Set(items.map((i) => i.song.id))
 
   return (
@@ -57,6 +61,19 @@ export function PlaylistDetailPage() {
           <Link to="/playlists">
             <Button variant="outline">Retour</Button>
           </Link>
+          {isManager ? (
+            <Dialog open={editOpen} onOpenChange={setEditOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">Modifier</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Modifier la playlist</DialogTitle>
+                </DialogHeader>
+                <EditPlaylistForm playlist={playlist} onSaved={() => setEditOpen(false)} />
+              </DialogContent>
+            </Dialog>
+          ) : null}
           {isManager ? (
             <Button
               variant="destructive"
@@ -82,6 +99,56 @@ export function PlaylistDetailPage() {
 
       <ShareLinksCard playlistId={playlist.id} shareLinks={shareLinks} allGroups={allGroups} isManager={isManager} />
     </div>
+  )
+}
+
+function EditPlaylistForm({
+  playlist,
+  onSaved,
+}: {
+  playlist: { id: string; name: string; description: string | null }
+  onSaved: () => void
+}) {
+  const updatePlaylist = useMutation({
+    mutationFn: (value: { name: string; description: string }) =>
+      updatePlaylistFn({
+        data: { playlistId: playlist.id, name: value.name, description: value.description.trim() || null },
+      }),
+    // The name also shows on the list, the dashboard and share pages.
+    meta: { invalidates: [playlistKeys.all] },
+  })
+
+  const form = useAppForm({
+    defaultValues: { name: playlist.name, description: playlist.description ?? '' },
+    validators: { onChange: PlaylistDetailsForm },
+    onSubmit: async ({ value }) => {
+      try {
+        await updatePlaylist.mutateAsync(value)
+      } catch {
+        return // shown inline below
+      }
+      onSaved()
+    },
+  })
+
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        form.handleSubmit()
+      }}
+    >
+      <form.AppField name="name" children={(field) => <field.TextField label="Nom" autoFocus />} />
+      <form.AppField
+        name="description"
+        children={(field) => <field.TextField label="Description (optionnel)" placeholder="Messe de minuit" />}
+      />
+      {updatePlaylist.isError ? <p className="text-sm text-destructive">Impossible de modifier la playlist</p> : null}
+      <form.AppForm>
+        <form.SubmitButton label="Enregistrer" pendingLabel="Enregistrement…" />
+      </form.AppForm>
+    </form>
   )
 }
 
