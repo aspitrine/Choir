@@ -13,6 +13,7 @@ import {
   isInviteLinkUsed,
   searchInvitations,
   searchMembers,
+  updateInvite,
   updateMemberGroups,
   updateMemberRole,
 } from './members'
@@ -137,6 +138,23 @@ describe('invitations', () => {
     })
     expect(await fail(layer, acceptInvite(singer.id, created.id, created.secret))).toBeInstanceOf(ValidationError)
     expect(await t.db.select().from(memberGroup)).toEqual([])
+  })
+
+  it('edits a pending invitation, within the choir only', async () => {
+    const { org, created, layer } = await invited()
+    const alto = await seedGroup(t.db, org.id, 'Alto')
+    const edit = { invitationId: created.id, firstName: 'Jeanne', lastName: 'Martin', role: 'member' as const, groupIds: [alto.id] }
+    await run(layer, updateInvite(actorOf(org.id), edit))
+    const [row] = await t.db.select().from(invitation).where(eq(invitation.id, created.id))
+    expect(row).toMatchObject({ firstName: 'Jeanne', lastName: 'Martin', role: 'member', email: input.email })
+    expect(await t.db.select().from(invitationGroup)).toEqual([{ invitationId: created.id, groupId: alto.id }])
+
+    const other = await seedOrg(t.db, 'B')
+    expect(await fail(layer, updateInvite(actorOf(other.id), { ...edit, groupIds: [] }))).toBeInstanceOf(NotFoundError)
+    expect(await fail(layer, updateInvite(actorOf(org.id), { ...edit, groupIds: [(await seedGroup(t.db, other.id, 'X')).id] }))).toBeInstanceOf(NotFoundError)
+    expect(await fail(layer, updateInvite(actorOf(org.id, 'member'), edit))).toBeInstanceOf(ForbiddenError)
+    await t.db.update(invitation).set({ status: 'accepted' }).where(eq(invitation.id, created.id))
+    expect(await fail(layer, updateInvite(actorOf(org.id), edit))).toBeInstanceOf(NotFoundError)
   })
 
   it('tells a used link apart, only with its secret', async () => {

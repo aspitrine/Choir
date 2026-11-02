@@ -24,6 +24,18 @@ test('an invited singer creates an account, joins the choir with read-only acces
   expect(link).toContain('/accept-invite/')
 
   expect(new URL(link).searchParams.get('k')).toMatch(/^[\w-]{43}$/)
+  await dialog.getByRole('button', { name: 'Fermer' }).click()
+
+  // A pending invitation can be corrected; the link stays the same.
+  const invitationRow = page.getByRole('row').filter({ hasText: email })
+  await invitationRow.getByRole('button', { name: 'Modifier' }).click()
+  const editInvite = page.getByRole('dialog', { name: "Modifier l'invitation" })
+  await expect(editInvite.getByLabel('Prénom')).toHaveValue('Jeanne')
+  await editInvite.getByLabel('Nom', { exact: true }).fill('Durand')
+  await editInvite.getByRole('button', { name: 'Enregistrer' }).click()
+  await expect(editInvite).toBeHidden()
+  await expect(invitationRow.getByText('Jeanne Durand')).toBeVisible()
+  await expect(invitationRow.getByText(voice)).toBeVisible()
 
   const singer = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const pub = await singer.newPage()
@@ -75,6 +87,16 @@ test('an invited singer creates an account, joins the choir with read-only acces
   const memberRow = page.getByRole('row').filter({ hasText: email })
   await expect(memberRow).toBeVisible()
   await expect(memberRow.getByText(voice)).toBeVisible()
+
+  // Role and groups are edited together, and the row shows the result right away.
+  await memberRow.getByRole('button', { name: 'Modifier' }).click()
+  const editMember = page.getByRole('dialog', { name: 'Modifier Jeanne Choriste' })
+  await editMember.getByLabel('Rôle').selectOption('admin')
+  await editMember.getByLabel(voice).uncheck()
+  await editMember.getByRole('button', { name: 'Enregistrer' }).click()
+  await expect(editMember).toBeHidden()
+  await expect(memberRow.getByRole('cell', { name: 'Admin', exact: true })).toBeVisible()
+  await expect(memberRow.getByText('Tout le monde')).toBeVisible()
 
   // Once removed, the singer's still-open session loses access to the choir.
   await memberRow.getByRole('button', { name: 'Retirer' }).click()

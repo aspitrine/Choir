@@ -5,7 +5,7 @@ import { requireManager } from '@/features/auth/application/access'
 import type { Actor, AssignableRole } from '@/features/auth/domain/roles'
 import { requireOrgGroups } from '@/features/groups/application/groups'
 import { OrganizationAuthority } from '@/features/organizations/application/ports'
-import { generateInvitationSecret, secretsMatch, type CreateInviteInput } from '../domain/invitation'
+import { generateInvitationSecret, secretsMatch, type CreateInviteInput, type UpdateInviteInput } from '../domain/invitation'
 import { MemberRepository } from './ports'
 
 // Member rows carry emails, pending invitations carry invite secrets: managers only.
@@ -35,6 +35,17 @@ export const createInvite = (actor: Actor, input: CreateInviteInput) =>
     const secret = generateInvitationSecret()
     yield* members.saveInvitation(id, { secret, groupIds })
     return { id, secret }
+  })
+
+/** Only while pending: once accepted, the member's own role and groups are edited instead. */
+export const updateInvite = (actor: Actor, { invitationId, groupIds, ...details }: UpdateInviteInput) =>
+  Effect.gen(function* () {
+    yield* requireManager(actor)
+    const ids = yield* requireOrgGroups(actor.orgId, groupIds)
+    const members = yield* MemberRepository
+    if (!(yield* members.updatePendingInvitation(actor.orgId, invitationId, { ...details, groupIds: ids }))) {
+      return yield* Effect.fail(new NotFoundError({ entity: 'invitation', id: invitationId }))
+    }
   })
 
 export const revokeInvite = (actor: Actor, invitationId: string) =>

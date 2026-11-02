@@ -6,7 +6,7 @@ import { decodeInput, requestHeaders } from '@/shared/server/request'
 import { runServer, withActor } from '@/app/runtime'
 import { requireSession } from '@/features/auth/application/access'
 import { AssignableRole } from '@/features/auth/domain/roles'
-import { CreateInviteInput } from '../domain/invitation'
+import { CreateInviteInput, UpdateInviteInput } from '../domain/invitation'
 import {
   acceptInvite,
   createInvite,
@@ -16,6 +16,7 @@ import {
   searchInvitations,
   searchMembers,
   updateMemberGroups,
+  updateInvite,
   updateMemberRole,
 } from '../application/members'
 
@@ -32,6 +33,10 @@ export const searchInvitationsFn = createServerFn({ method: 'GET' })
 export const createInviteFn = createServerFn({ method: 'POST' })
   .validator(decodeInput(CreateInviteInput))
   .handler(({ data }) => withActor((actor) => createInvite(actor, data)))
+
+export const updateInviteFn = createServerFn({ method: 'POST' })
+  .validator(decodeInput(UpdateInviteInput))
+  .handler(({ data }) => withActor((actor) => updateInvite(actor, data)))
 
 export const revokeInviteFn = createServerFn({ method: 'POST' })
   .validator(decodeInput(Schema.Struct({ invitationId: Id })))

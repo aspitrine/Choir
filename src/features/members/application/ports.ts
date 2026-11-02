@@ -23,6 +23,12 @@ export class MemberRepository extends Context.Tag('MemberRepository')<
       invitationId: string,
       details: { secret: string; groupIds: ReadonlyArray<string> },
     ) => Effect.Effect<void>
+    /** Updates a pending invitation of the organization and replaces its groups; false if there is none. */
+    readonly updatePendingInvitation: (
+      orgId: string,
+      invitationId: string,
+      details: { firstName: string | null; lastName: string | null; role: string; groupIds: ReadonlyArray<string> },
+    ) => Effect.Effect<boolean>
     /** The invite link's secret and Better Auth's status (pending, accepted, canceled…). */
     readonly findInvitationLink: (
       invitationId: string,

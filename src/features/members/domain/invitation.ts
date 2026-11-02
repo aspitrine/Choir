@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { GroupIds } from '@/shared/domain/schemas'
+import { GroupIds, Id } from '@/shared/domain/schemas'
 import { AssignableRole } from '@/features/auth/domain/roles'
 
 const OptionalName = Schema.NullOr(Schema.String.pipe(Schema.maxLength(100)))
@@ -15,6 +15,13 @@ export const CreateInviteInput = Schema.Struct({
   groupIds: GroupIds,
 })
 export type CreateInviteInput = typeof CreateInviteInput.Type
+
+/** The email can't change: the link carries it and Better Auth checks the recipient against it. */
+export const UpdateInviteInput = Schema.Struct({
+  invitationId: Id,
+  ...CreateInviteInput.omit('email').fields,
+})
+export type UpdateInviteInput = typeof UpdateInviteInput.Type
 
 /**
  * Random secret carried by the invite link and checked on acceptance: the

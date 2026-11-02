@@ -115,6 +115,29 @@ export const DrizzleMemberRepository = Layer.effect(
         }
       }),
 
+    updatePendingInvitation: (orgId, invitationId, { firstName, lastName, role, groupIds }) =>
+      Effect.promise(() =>
+        db.transaction(async (tx) => {
+          const updated = await tx
+            .update(invitation)
+            .set({ firstName, lastName, role })
+            .where(
+              and(
+                eq(invitation.id, invitationId),
+                eq(invitation.organizationId, orgId),
+                eq(invitation.status, 'pending'),
+              ),
+            )
+            .returning({ id: invitation.id })
+          if (updated.length === 0) return false
+          await tx.delete(invitationGroup).where(eq(invitationGroup.invitationId, invitationId))
+          if (groupIds.length > 0) {
+            await tx.insert(invitationGroup).values(groupIds.map((groupId) => ({ invitationId, groupId })))
+          }
+          return true
+        }),
+      ),
+
     findInvitationLink: (invitationId) =>
       Effect.promise(() =>
         db

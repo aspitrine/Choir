@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/primitives/table'
 import { TablePager } from '@/shared/ui/table-pager'
 import { useConfirm } from '@/shared/ui/confirm-dialog'
-import { createInviteFn, revokeInviteFn, updateMemberRoleFn, updateMemberGroupsFn, removeMemberFn } from '@/features/members/server/members.functions'
+import { createInviteFn, updateInviteFn, revokeInviteFn, updateMemberRoleFn, updateMemberGroupsFn, removeMemberFn } from '@/features/members/server/members.functions'
 import { memberKeys, memberQueries } from '@/features/members/ui/queries'
 import { groupQueries } from '@/features/groups/ui/queries'
 import { isManagerRole, useRole } from '@/features/auth/ui/queries'
@@ -96,6 +96,7 @@ export function MembersPage() {
       />
 
       <PendingInvitationsCard
+        allGroups={allGroups}
         isManager={isManager}
         orgName={activeOrganization?.name}
       />
@@ -176,9 +177,11 @@ function MembersActiveCard({
 }
 
 function PendingInvitationsCard({
+  allGroups,
   isManager,
   orgName,
 }: {
+  allGroups: Array<{ id: string; name: string }>
   isManager: boolean
   orgName: string | undefined
 }) {
@@ -227,37 +230,30 @@ function PendingInvitationsCard({
                 <TableCell className="text-muted-foreground">{invitation.email}</TableCell>
                 <TableCell>{roleLabel(invitation.role)}</TableCell>
                 <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {groups.length === 0 ? (
-                      <span className="text-xs text-muted-foreground">Tous les groupes</span>
-                    ) : (
-                      groups.map((g) => (
-                        <Badge key={g.id} variant="secondary">
-                          {g.name}
-                        </Badge>
-                      ))
-                    )}
-                  </div>
+                  <GroupBadges groups={groups} emptyLabel="Tous les groupes" />
                 </TableCell>
                 <TableCell>
                   <CopyLinkButton url={buildInviteLink(origin, invitation.id, invitation.secret, invitation.email, orgName)} />
                 </TableCell>
                 {isManager ? (
                   <TableCell>
-                    <button
-                      className="text-xs text-destructive hover:underline"
-                      onClick={async () => {
-                        const ok = await confirm({
-                          title: 'Révoquer cette invitation',
-                          description: `Le lien envoyé à "${invitation.email}" cessera de fonctionner.`,
-                          confirmLabel: 'Révoquer',
-                        })
-                        if (!ok) return
-                        revokeInvite.mutate(invitation.id)
-                      }}
-                    >
-                      Révoquer
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <EditInviteDialog invitation={invitation} groups={groups} allGroups={allGroups} />
+                      <button
+                        className="text-xs text-destructive hover:underline"
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: 'Révoquer cette invitation',
+                            description: `Le lien envoyé à "${invitation.email}" cessera de fonctionner.`,
+                            confirmLabel: 'Révoquer',
+                          })
+                          if (!ok) return
+                          revokeInvite.mutate(invitation.id)
+                        }}
+                      >
+                        Révoquer
+                      </button>
+                    </div>
                   </TableCell>
                 ) : null}
               </TableRow>
@@ -294,114 +290,269 @@ function MemberRow({
   isSelf: boolean
 }) {
   const confirm = useConfirm()
-  const [groupsOpen, setGroupsOpen] = useState(false)
-  const [selected, setSelected] = useState(new Set(row.groups.map((g) => g.id)))
-  const memberId = row.member.id
-  const queryClient = useQueryClient()
-  const invalidates = [memberKeys.all]
-  const updateRole = useMutation({
-    mutationFn: (role: InviteRole) => updateMemberRoleFn({ data: { memberId, role } }),
-    meta: { errorMessage: 'Modification du rôle impossible', invalidates },
-    // On failure too, so the select shows the actual role again.
-    onError: () => queryClient.invalidateQueries({ queryKey: memberKeys.all }),
-  })
-  const updateGroups = useMutation({
-    mutationFn: (groupIds: Array<string>) => updateMemberGroupsFn({ data: { memberId, groupIds } }),
-    meta: { errorMessage: 'Enregistrement impossible', invalidates },
-    onSuccess: () => setGroupsOpen(false),
-  })
+  const [editOpen, setEditOpen] = useState(false)
   const removeMember = useMutation({
-    mutationFn: () => removeMemberFn({ data: { memberId } }),
-    meta: { errorMessage: 'Retrait impossible', invalidates },
+    mutationFn: () => removeMemberFn({ data: { memberId: row.member.id } }),
+    meta: { errorMessage: 'Retrait impossible', invalidates: [memberKeys.all] },
   })
 
   return (
     <TableRow>
       <TableCell className="font-medium">{row.user.name}</TableCell>
       <TableCell className="text-muted-foreground">{row.user.email}</TableCell>
+      <TableCell>{roleLabel(row.member.role)}</TableCell>
       <TableCell>
-        {isManager && row.member.role !== 'owner' && !isSelf ? (
-          <select
-            className="rounded-md border bg-background px-2 py-1 text-sm"
-            value={row.member.role}
-            disabled={updateRole.isPending}
-            onChange={(e) => updateRole.mutate(e.target.value as InviteRole)}
-          >
-            <option value="admin">Admin</option>
-            <option value="member">Utilisateur</option>
-          </select>
-        ) : (
-          roleLabel(row.member.role)
-        )}
-      </TableCell>
-      <TableCell>
-        <div className="flex flex-wrap gap-1">
-          {row.groups.length === 0 ? (
-            <span className="text-xs text-muted-foreground">Tout le monde</span>
-          ) : (
-            row.groups.map((g) => (
-              <Badge key={g.id} variant="secondary">
-                {g.name}
-              </Badge>
-            ))
-          )}
-        </div>
-        {isManager ? (
-          <Dialog open={groupsOpen} onOpenChange={setGroupsOpen}>
-            <DialogTrigger asChild>
-              <button className="mt-1 text-xs text-muted-foreground hover:underline">Modifier</button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Groupes de {row.user.name}</DialogTitle>
-              </DialogHeader>
-              <div className="flex flex-wrap gap-3">
-                {allGroups.map((grp) => (
-                  <label key={grp.id} className="flex items-center gap-1.5 text-sm">
-                    <Checkbox
-                      checked={selected.has(grp.id)}
-                      onCheckedChange={(checked) => {
-                        const next = new Set(selected)
-                        if (checked === true) next.add(grp.id)
-                        else next.delete(grp.id)
-                        setSelected(next)
-                      }}
-                    />
-                    {grp.name}
-                  </label>
-                ))}
-                {allGroups.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Aucun groupe créé pour l'instant</p>
-                ) : null}
-              </div>
-              <Button disabled={updateGroups.isPending} onClick={() => updateGroups.mutate([...selected])}>
-                {updateGroups.isPending ? 'Enregistrement…' : 'Enregistrer'}
-              </Button>
-            </DialogContent>
-          </Dialog>
-        ) : null}
+        <GroupBadges groups={row.groups} emptyLabel="Tout le monde" />
       </TableCell>
       {isManager ? (
         <TableCell>
-          {row.member.role !== 'owner' ? (
-            <button
-              className="text-xs text-destructive hover:underline"
-              onClick={async () => {
-                const ok = await confirm({
-                  title: 'Retirer ce membre',
-                  description: `"${row.user.name}" perdra l'accès à cette chorale.`,
-                  confirmLabel: 'Retirer',
-                })
-                if (!ok) return
-                removeMember.mutate()
-              }}
-            >
-              Retirer
-            </button>
-          ) : null}
+          <div className="flex items-center gap-3">
+            <Dialog open={editOpen} onOpenChange={setEditOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  Modifier
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Modifier {row.user.name}</DialogTitle>
+                  <DialogDescription>{row.user.email}</DialogDescription>
+                </DialogHeader>
+                {/* Mounted on open: always starts from the current role and groups. */}
+                <EditMemberForm row={row} allGroups={allGroups} isSelf={isSelf} onSaved={() => setEditOpen(false)} />
+              </DialogContent>
+            </Dialog>
+            {row.member.role !== 'owner' ? (
+              <button
+                className="text-xs text-destructive hover:underline"
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Retirer ce membre',
+                    description: `"${row.user.name}" perdra l'accès à cette chorale.`,
+                    confirmLabel: 'Retirer',
+                  })
+                  if (!ok) return
+                  removeMember.mutate()
+                }}
+              >
+                Retirer
+              </button>
+            ) : null}
+          </div>
         </TableCell>
       ) : null}
     </TableRow>
+  )
+}
+
+function EditMemberForm({
+  row,
+  allGroups,
+  isSelf,
+  onSaved,
+}: {
+  row: MemberRow
+  allGroups: Array<{ id: string; name: string }>
+  isSelf: boolean
+  onSaved: () => void
+}) {
+  const queryClient = useQueryClient()
+  const memberId = row.member.id
+  const canChangeRole = row.member.role !== 'owner' && !isSelf
+  const [role, setRole] = useState(row.member.role)
+  const [groupIds, setGroupIds] = useState(new Set(row.groups.map((g) => g.id)))
+  const save = useMutation({
+    mutationFn: async () => {
+      if (canChangeRole && role !== row.member.role) {
+        await updateMemberRoleFn({ data: { memberId, role: role as InviteRole } })
+      }
+      await updateMemberGroupsFn({ data: { memberId, groupIds: [...groupIds] } })
+    },
+    meta: { errorMessage: 'Enregistrement impossible', invalidates: [memberKeys.all] },
+    onSuccess: onSaved,
+    // The role may have been saved before the groups failed: show what was stored.
+    onError: () => queryClient.invalidateQueries({ queryKey: memberKeys.all }),
+  })
+
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        save.mutate()
+      }}
+    >
+      <div className="space-y-1">
+        <Label htmlFor="member-role">Rôle</Label>
+        {canChangeRole ? (
+          <RoleSelect id="member-role" value={role as InviteRole} onChange={setRole} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {roleLabel(row.member.role)} —{' '}
+            {isSelf ? 'vous ne pouvez pas modifier votre propre rôle' : 'le rôle du propriétaire ne change pas'}
+          </p>
+        )}
+      </div>
+      <GroupCheckboxes allGroups={allGroups} selected={groupIds} onChange={setGroupIds} />
+      <Button type="submit" className="w-full" disabled={save.isPending}>
+        {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
+      </Button>
+    </form>
+  )
+}
+
+function EditInviteDialog({
+  invitation,
+  groups,
+  allGroups,
+}: {
+  invitation: InvitationRow['invitation']
+  groups: Array<{ id: string; name: string }>
+  allGroups: Array<{ id: string; name: string }>
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          Modifier
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Modifier l'invitation</DialogTitle>
+          <DialogDescription>Le lien d'invitation reste le même</DialogDescription>
+        </DialogHeader>
+        <EditInviteForm invitation={invitation} groups={groups} allGroups={allGroups} onSaved={() => setOpen(false)} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditInviteForm({
+  invitation,
+  groups,
+  allGroups,
+  onSaved,
+}: {
+  invitation: InvitationRow['invitation']
+  groups: Array<{ id: string; name: string }>
+  allGroups: Array<{ id: string; name: string }>
+  onSaved: () => void
+}) {
+  const [firstName, setFirstName] = useState(invitation.firstName ?? '')
+  const [lastName, setLastName] = useState(invitation.lastName ?? '')
+  const [role, setRole] = useState(invitation.role as InviteRole)
+  const [groupIds, setGroupIds] = useState(new Set(groups.map((g) => g.id)))
+  const save = useMutation({
+    mutationFn: () =>
+      updateInviteFn({
+        data: {
+          invitationId: invitation.id,
+          firstName: firstName.trim() || null,
+          lastName: lastName.trim() || null,
+          role,
+          groupIds: [...groupIds],
+        },
+      }),
+    meta: { errorMessage: 'Enregistrement impossible', invalidates: [memberKeys.all] },
+    onSuccess: onSaved,
+  })
+
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        save.mutate()
+      }}
+    >
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label htmlFor="edit-invite-firstname">Prénom</Label>
+          <Input id="edit-invite-firstname" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoFocus />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="edit-invite-lastname">Nom</Label>
+          <Input id="edit-invite-lastname" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="edit-invite-email">Email</Label>
+        <Input id="edit-invite-email" value={invitation.email} disabled />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="edit-invite-role">Rôle</Label>
+        <RoleSelect id="edit-invite-role" value={role} onChange={setRole} />
+      </div>
+      <GroupCheckboxes allGroups={allGroups} selected={groupIds} onChange={setGroupIds} />
+      <Button type="submit" className="w-full" disabled={save.isPending}>
+        {save.isPending ? 'Enregistrement…' : 'Enregistrer'}
+      </Button>
+    </form>
+  )
+}
+
+function RoleSelect({ id, value, onChange }: { id: string; value: InviteRole; onChange: (role: InviteRole) => void }) {
+  return (
+    <select
+      id={id}
+      className="block w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+      value={value}
+      onChange={(e) => onChange(e.target.value as InviteRole)}
+    >
+      <option value="member">Utilisateur (consultation seule)</option>
+      <option value="admin">Admin (création / modification / suppression)</option>
+    </select>
+  )
+}
+
+function GroupBadges({ groups, emptyLabel }: { groups: Array<{ id: string; name: string }>; emptyLabel: string }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {groups.length === 0 ? (
+        <span className="text-xs text-muted-foreground">{emptyLabel}</span>
+      ) : (
+        groups.map((g) => (
+          <Badge key={g.id} variant="secondary">
+            {g.name}
+          </Badge>
+        ))
+      )}
+    </div>
+  )
+}
+
+function GroupCheckboxes({
+  allGroups,
+  selected,
+  onChange,
+}: {
+  allGroups: Array<{ id: string; name: string }>
+  selected: Set<string>
+  onChange: (next: Set<string>) => void
+}) {
+  if (allGroups.length === 0) return null
+  return (
+    <div className="space-y-1">
+      <p className="text-sm font-medium">Groupes (optionnel)</p>
+      <div className="flex flex-wrap gap-3">
+        {allGroups.map((grp) => (
+          <label key={grp.id} className="flex items-center gap-1.5 text-sm">
+            <Checkbox
+              checked={selected.has(grp.id)}
+              onCheckedChange={(checked) => {
+                const next = new Set(selected)
+                if (checked === true) next.add(grp.id)
+                else next.delete(grp.id)
+                onChange(next)
+              }}
+            />
+            {grp.name}
+          </label>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -498,37 +649,9 @@ function InviteDialogForm({
       </div>
       <div className="space-y-1">
         <Label htmlFor="invite-role">Rôle</Label>
-        <select
-          id="invite-role"
-          className="block w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-          value={role}
-          onChange={(e) => setRole(e.target.value as InviteRole)}
-        >
-          <option value="member">Utilisateur (consultation seule)</option>
-          <option value="admin">Admin (création / modification / suppression)</option>
-        </select>
+        <RoleSelect id="invite-role" value={role} onChange={setRole} />
       </div>
-      {allGroups.length > 0 ? (
-        <div className="space-y-1">
-          <p className="text-sm font-medium">Groupes (optionnel)</p>
-          <div className="flex flex-wrap gap-3">
-            {allGroups.map((grp) => (
-              <label key={grp.id} className="flex items-center gap-1.5 text-sm">
-                <Checkbox
-                  checked={groupIds.has(grp.id)}
-                  onCheckedChange={(checked) => {
-                    const next = new Set(groupIds)
-                    if (checked === true) next.add(grp.id)
-                    else next.delete(grp.id)
-                    setGroupIds(next)
-                  }}
-                />
-                {grp.name}
-              </label>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      <GroupCheckboxes allGroups={allGroups} selected={groupIds} onChange={setGroupIds} />
       {createInvite.isError ? (
         <p className="text-sm text-destructive">Invitation impossible (email déjà invité ou déjà membre ?)</p>
       ) : null}
