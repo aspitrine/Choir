@@ -10,6 +10,7 @@ import { CreateInviteInput } from '../domain/invitation'
 import {
   acceptInvite,
   createInvite,
+  isInviteLinkUsed,
   removeMember,
   revokeInvite,
   searchInvitations,
@@ -48,9 +49,16 @@ export const removeMemberFn = createServerFn({ method: 'POST' })
   .validator(decodeInput(ByMember))
   .handler(({ data }) => withActor((actor) => removeMember(actor, data.memberId)))
 
+const InviteLink = Schema.Struct({ invitationId: Id, secret: Schema.String.pipe(Schema.maxLength(200)) })
+
+// Opened before signing in: no session required.
+export const isInviteLinkUsedFn = createServerFn({ method: 'GET' })
+  .validator(decodeInput(InviteLink))
+  .handler(({ data }) => runServer(isInviteLinkUsed(data.invitationId, data.secret)))
+
 // The invitee isn't a member yet: only a session is required.
 export const acceptInvitationFn = createServerFn({ method: 'POST' })
-  .validator(decodeInput(Schema.Struct({ invitationId: Id, secret: Schema.String.pipe(Schema.maxLength(200)) })))
+  .validator(decodeInput(InviteLink))
   .handler(({ data }) =>
     runServer(
       Effect.flatMap(requireSession(requestHeaders()), (session) =>

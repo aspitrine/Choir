@@ -79,6 +79,17 @@ export const finalizeAcceptance = (userId: string, memberId: string, invitationI
   })
 
 /**
+ * Whether this invite link was already used, so a second visit can go straight
+ * to the app. Public (no session yet): requires the link's secret, so the
+ * invitation id alone reveals nothing.
+ */
+export const isInviteLinkUsed = (invitationId: string, secret: string) =>
+  Effect.gen(function* () {
+    const link = yield* Effect.flatMap(MemberRepository, (members) => members.findInvitationLink(invitationId))
+    return !!link?.secret && secretsMatch(link.secret, secret) && link.status === 'accepted'
+  })
+
+/**
  * The only way to accept an invitation: with the secret from the invite link.
  * Better Auth's own endpoint trusts the invitation id alone, which any member
  * can list, while password sign-ups don't prove email ownership.
@@ -86,7 +97,7 @@ export const finalizeAcceptance = (userId: string, memberId: string, invitationI
 export const acceptInvite = (userId: string, invitationId: string, secret: string) =>
   Effect.gen(function* () {
     const members = yield* MemberRepository
-    const expected = yield* members.findInvitationSecret(invitationId)
+    const expected = (yield* members.findInvitationLink(invitationId))?.secret
     if (!expected || !secretsMatch(expected, secret)) {
       return yield* Effect.fail(new ForbiddenError({ reason: 'invalid-invitation-link' }))
     }

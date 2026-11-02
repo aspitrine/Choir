@@ -22,6 +22,7 @@ import { authClient, useSession } from '@/features/auth/ui/auth-client'
 import type { AssignableRole as InviteRole } from '@/features/auth/domain/roles'
 import type { Page } from '@/shared/domain/pagination'
 import { DeleteOrganizationCard } from '@/features/organizations/ui/delete-organization-card'
+import { RenameOrganizationCard } from '@/features/organizations/ui/rename-organization-card'
 
 const EMPTY_PAGE = { rows: [], total: 0, page: 1, pageSize: 1 }
 
@@ -98,6 +99,8 @@ export function MembersPage() {
         isManager={isManager}
         orgName={activeOrganization?.name}
       />
+
+      {isManager ? <RenameOrganizationCard /> : null}
 
       {role === 'owner' ? <DeleteOrganizationCard /> : null}
     </div>

@@ -52,6 +52,16 @@ test('an invited singer creates an account, joins the choir with read-only acces
   await expect(pub).toHaveURL(/\/dashboard/)
   await expect(pub.getByRole('button', { name: director.org })).toBeVisible()
 
+  // A used link leads home: the dashboard when signed in, the login page otherwise.
+  await gotoHydrated(pub, link)
+  await expect(pub).toHaveURL(/\/dashboard/)
+  const stranger = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  const anonymous = await stranger.newPage()
+  await gotoHydrated(anonymous, link)
+  await expect(anonymous).toHaveURL(new URL('/', link).toString())
+  await expect(anonymous.getByRole('button', { name: 'Se connecter avec Google' })).toBeVisible()
+  await stranger.close()
+
   // Members can browse but not edit.
   await gotoHydrated(pub, '/songs')
   await expect(pub.getByRole('heading', { name: 'Chants' })).toBeVisible()

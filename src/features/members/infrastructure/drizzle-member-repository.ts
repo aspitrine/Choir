@@ -115,10 +115,14 @@ export const DrizzleMemberRepository = Layer.effect(
         }
       }),
 
-    findInvitationSecret: (invitationId) =>
+    findInvitationLink: (invitationId) =>
       Effect.promise(() =>
-        db.select({ secret: invitation.secret }).from(invitation).where(eq(invitation.id, invitationId)).limit(1),
-      ).pipe(Effect.map(([row]) => row?.secret ?? null)),
+        db
+          .select({ secret: invitation.secret, status: invitation.status })
+          .from(invitation)
+          .where(eq(invitation.id, invitationId))
+          .limit(1),
+      ).pipe(Effect.map(([row]) => row ?? null)),
 
     isAcceptedBy: (userId, memberId, invitationId) =>
       Effect.promise(() =>

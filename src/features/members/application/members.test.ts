@@ -10,6 +10,7 @@ import {
   acceptInvite,
   createInvite,
   finalizeAcceptance,
+  isInviteLinkUsed,
   searchInvitations,
   searchMembers,
   updateMemberGroups,
@@ -136,6 +137,17 @@ describe('invitations', () => {
     })
     expect(await fail(layer, acceptInvite(singer.id, created.id, created.secret))).toBeInstanceOf(ValidationError)
     expect(await t.db.select().from(memberGroup)).toEqual([])
+  })
+
+  it('tells a used link apart, only with its secret', async () => {
+    const { created, singer, layer } = await invited()
+    expect(await run(layer, isInviteLinkUsed(created.id, created.secret))).toBe(false)
+
+    await run(layer, acceptInvite(singer.id, created.id, created.secret))
+    expect(await run(layer, isInviteLinkUsed(created.id, created.secret))).toBe(true)
+    // The id alone reveals nothing about the invitation.
+    expect(await run(layer, isInviteLinkUsed(created.id, 'x'.repeat(created.secret.length)))).toBe(false)
+    expect(await run(layer, isInviteLinkUsed(crypto.randomUUID(), created.secret))).toBe(false)
   })
 })
 

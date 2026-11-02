@@ -23,7 +23,10 @@ export class MemberRepository extends Context.Tag('MemberRepository')<
       invitationId: string,
       details: { secret: string; groupIds: ReadonlyArray<string> },
     ) => Effect.Effect<void>
-    readonly findInvitationSecret: (invitationId: string) => Effect.Effect<string | null>
+    /** The invite link's secret and Better Auth's status (pending, accepted, canceled…). */
+    readonly findInvitationLink: (
+      invitationId: string,
+    ) => Effect.Effect<{ secret: string | null; status: string } | null>
     /** Whether this member row is the user's own, created by accepting this invitation. */
     readonly isAcceptedBy: (userId: string, memberId: string, invitationId: string) => Effect.Effect<boolean>
     /** Grants the invitation's groups to the member (idempotent). */
